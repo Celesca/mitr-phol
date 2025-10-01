@@ -5,3 +5,5 @@ faiss-cpu
 rank-bm25 
 boto3
 python-dotenv
+line-bot-sdk
+flask

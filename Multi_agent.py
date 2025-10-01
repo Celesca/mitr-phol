@@ -114,8 +114,28 @@ def crew_infer(question_text: str) -> str:
     )
 
     result = crew.kickoff()
-    return result
+    # Extract the actual text result from CrewOutput
 
-query = "พันธุ์อ้อยที่ทนโรคใบด่าง"
-answer = crew_infer(query)
-print(answer)
+    # Handle different CrewAI result formats
+    if hasattr(result, 'final_output'):
+        return str(result.final_output)
+    elif hasattr(result, 'output'):
+        return str(result.output)
+    elif hasattr(result, 'raw'):
+        return str(result.raw)
+    elif isinstance(result, (list, tuple)) and len(result) > 0:
+        # If it's a list of task results, get the last one (final answer)
+        final_result = result[-1]
+        if hasattr(final_result, 'output'):
+            return str(final_result.output)
+        elif hasattr(final_result, 'raw'):
+            return str(final_result.raw)
+        else:
+            return str(final_result)
+    else:
+        return str(result)
+
+# Remove the test code - this will be called from line_bot.py
+# query = "พันธุ์อ้อยที่ทนโรคใบด่าง"
+# answer = crew_infer(query)
+# print(answer)
