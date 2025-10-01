@@ -46,7 +46,7 @@ advisor = Agent(
     llm=llm,
     role="Sugarcane Farmer Advisor",
     goal="Provide friendly, easy-to-understand advice for farmers",
-    backstory="I am a kind advisor who loves helping farmers with easy-to-understand words, using numbered points for clear recommendations",
+    backstory="I am a kind advisor who loves helping farmers with easy-to-understand words, no special symbols",
     tools=[],
     verbose=True
 )
@@ -100,11 +100,9 @@ def crew_infer(question_text: str) -> str:
         Summarize the retrieved information into easy-to-understand and practical advice for farmers
         Based on the question '{question_text}'
         
-        Structure the answer with numbered points (1. 2. 3. etc.) for each main recommendation
-        Use Thai language for the final answer
-        Keep it friendly and conversational like a helpful advisor sister
+        Provide the answer as plain text, no special symbols, no headers, no bold text
         """,
-        expected_output="Structured advice with numbered points (1. 2. 3.) in Thai, easy to follow",
+        expected_output="Short description with practical steps (in Thai) as plain text without symbols",
         agent=advisor
     )
 
