@@ -1,0 +1,7 @@
+crewai 
+langchain-community 
+pypdf 
+faiss-cpu 
+rank-bm25 
+boto3
+python-dotenv
