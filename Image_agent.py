@@ -1,72 +1,232 @@
 from crewai import LLM, Agent, Task, Crew
 import os
+import sys
 from dotenv import load_dotenv
-import base64
-import requests
 from typing import Optional, Dict, Any
+import torch
+import torch.nn as nn
+from torchvision import transforms
+from PIL import Image
+import timm
 
 # Load environment variables
 load_dotenv()
 
+# Local classifier class (copied from inference.py)
+class LocalClassifier:
+    def __init__(self, model_path: str, device: str = None):
+        """
+        Initialize the sugarcane disease classifier
+
+        Args:
+            model_path: Path to the saved model weights (.pt file)
+            device: Device to run inference on ('cuda', 'cpu', or None for auto-detect)
+        """
+        # Configuration
+        self.CLASS_NAMES = ["Healthy", "Mosaic", "RedRot", "Rust", "Yellow"]
+        self.NUM_CLASSES = len(self.CLASS_NAMES)
+        self.INPUT_SIZE = 224
+        self.MODEL_NAME = "timm/convnextv2_tiny.fcmae"
+
+        # Set device
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
+
+        print(f"Using device: {self.device}")
+
+        # Load model
+        self.model = self._load_model(model_path)
+
+        # Define transforms
+        self.transform = transforms.Compose([
+            transforms.Resize((self.INPUT_SIZE, self.INPUT_SIZE)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    def _load_model(self, model_path: str):
+        """Load the trained model"""
+        # Create model architecture
+        model = timm.create_model(
+            self.MODEL_NAME,
+            pretrained=False,  # Don't load pretrained weights
+            num_classes=self.NUM_CLASSES
+        )
+
+        # Replace classifier with dropout (same as training)
+        original_fc = model.head.fc
+        model.head.fc = nn.Sequential(
+            nn.Dropout(0.2),
+            nn.Linear(original_fc.in_features, self.NUM_CLASSES)
+        )
+
+        # Load trained weights
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+
+        state_dict = torch.load(model_path, map_location=self.device)
+        model.load_state_dict(state_dict)
+
+        # Move to device and set to eval mode
+        model = model.to(self.device)
+        model.eval()
+
+        print(f"Model loaded successfully from {model_path}")
+        return model
+
+    def predict(self, image_path: str, top_k: int = 1) -> dict:
+        """
+        Predict disease class for a single image
+
+        Args:
+            image_path: Path to the image file
+            top_k: Number of top predictions to return
+
+        Returns:
+            Dictionary containing predictions
+        """
+        # Preprocess image
+        image_tensor = self._preprocess_image(image_path)
+
+        # Make prediction
+        with torch.no_grad():
+            outputs = self.model(image_tensor)
+            probabilities = torch.softmax(outputs, dim=1)
+            confidences, predicted_classes = torch.topk(probabilities, top_k, dim=1)
+
+        # Convert to CPU and numpy
+        confidences = confidences.cpu().numpy()[0]
+        predicted_classes = predicted_classes.cpu().numpy()[0]
+
+        # Prepare results
+        predictions = []
+        for i in range(top_k):
+            predictions.append({
+                'class': self.CLASS_NAMES[predicted_classes[i]],
+                'confidence': float(confidences[i]),
+                'confidence_percentage': f"{confidences[i] * 100:.2f}%"
+            })
+
+        result = {
+            'image_path': image_path,
+            'top_prediction': predictions[0],
+            'all_predictions': predictions,
+            'model_info': {
+                'model_name': self.MODEL_NAME,
+                'num_classes': self.NUM_CLASSES,
+                'input_size': self.INPUT_SIZE,
+                'classes': self.CLASS_NAMES
+            }
+        }
+
+        return result
+
+    def _preprocess_image(self, image_path: str) -> torch.Tensor:
+        """
+        Preprocess a single image
+
+        Args:
+            image_path: Path to the image file
+
+        Returns:
+            Preprocessed image tensor
+        """
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"Image file not found: {image_path}")
+
+        # Load and convert image
+        image = Image.open(image_path).convert('RGB')
+
+        # Apply transforms
+        image_tensor = self.transform(image)
+
+        # Add batch dimension
+        image_tensor = image_tensor.unsqueeze(0)
+
+        return image_tensor.to(self.device)
+
+from rag_tool import RAGSearchTool
+
 class ImageProcessor:
-    """Helper class to process images for Claude vision"""
+    """Helper class to process images for local inference"""
 
     @staticmethod
-    def encode_image_from_url(image_url: str) -> str:
-        """Download image from URL and encode as base64"""
+    def save_image_from_url(image_url: str, save_path: str) -> str:
+        """Download image from URL and save to local path"""
         try:
+            import requests
             response = requests.get(image_url)
             response.raise_for_status()
-            image_data = response.content
-            return base64.b64encode(image_data).decode('utf-8')
+
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+            # Save image
+            with open(save_path, 'wb') as f:
+                f.write(response.content)
+
+            return save_path
         except Exception as e:
-            raise Exception(f"Failed to download image: {str(e)}")
+            raise Exception(f"Failed to download and save image: {str(e)}")
 
     @staticmethod
-    def encode_image_from_path(image_path: str) -> str:
-        """Encode local image file as base64"""
+    def save_image_from_base64(base64_data: str, save_path: str) -> str:
+        """Save base64 image data to local path"""
         try:
-            with open(image_path, "rb") as image_file:
-                image_data = image_file.read()
-                return base64.b64encode(image_data).decode('utf-8')
+            import base64
+
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+            # Decode and save
+            image_data = base64.b64decode(base64_data)
+            with open(save_path, 'wb') as f:
+                f.write(image_data)
+
+            return save_path
         except Exception as e:
-            raise Exception(f"Failed to read image file: {str(e)}")
+            raise Exception(f"Failed to save base64 image: {str(e)}")
 
 class SugarcaneDiseaseClassifier:
-    """Multi-agent system for sugarcane disease classification using images"""
+    """Multi-agent system for sugarcane disease classification using local ViT model"""
 
     def __init__(self):
-        # Initialize Claude Sonnet 4 with vision capabilities
+        # Initialize local classifier
+        model_path = os.path.join(os.path.dirname(__file__), 'best_model.pt')
+        try:
+            self.local_classifier = LocalClassifier(model_path)
+        except Exception as e:
+            print(f"Warning: Could not load local classifier: {e}")
+            self.local_classifier = None
+
+        # Initialize RAG tool
+        self.rag_tool = RAGSearchTool()
+
+        # Initialize LLM for advice generation (using the same as Multi_agent.py)
         self.llm = LLM(
-            model="us.anthropic.claude-sonnet-4-20250514-v1:0",
+            model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
             aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
             aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
             aws_region_name="us-east-1"
         )
 
         # Create specialized agents
-        self.image_analyzer = Agent(
+        self.disease_analyzer = Agent(
             llm=self.llm,
-            role="Sugarcane Disease Image Analyzer",
-            goal="Analyze sugarcane images to identify visual symptoms of diseases",
-            backstory="I am an expert in visual analysis of sugarcane plants, specializing in identifying disease symptoms from photographs. I can detect discoloration, lesions, wilting, and other visual indicators of sugarcane diseases.",
-            verbose=True
+            role="Disease Analysis Specialist",
+            goal="Analyze disease classification results and provide detailed explanations",
+            backstory="I am an expert in sugarcane diseases who can interpret classification results and explain what they mean for farmers.",
+            verbose=False
         )
 
-        self.disease_classifier = Agent(
+        self.treatment_advisor = Agent(
             llm=self.llm,
-            role="Disease Classification Specialist",
-            goal="Classify sugarcane diseases based on symptoms and provide treatment recommendations",
-            backstory="I am a sugarcane pathology expert who can accurately diagnose diseases based on symptoms and provide evidence-based treatment recommendations. I understand the common diseases affecting sugarcane in Thailand and their management strategies.",
-            verbose=True
-        )
-
-        self.advisor_agent = Agent(
-            llm=self.llm,
-            role="Treatment Advisor",
+            role="Treatment and Prevention Advisor",
             goal="Provide practical treatment recommendations and prevention strategies",
-            backstory="I am a helpful agricultural advisor who provides clear, actionable recommendations for managing sugarcane diseases. I focus on integrated pest management and sustainable farming practices.",
-            verbose=True
+            backstory="I am a sugarcane disease management expert who provides actionable advice for treating and preventing sugarcane diseases.",
+            verbose=False
         )
 
     def classify_disease_from_image(self, image_path: str, user_description: str = "") -> str:
@@ -81,277 +241,102 @@ class SugarcaneDiseaseClassifier:
             Classification result with treatment recommendations
         """
 
-        # Convert image to base64 for Claude vision API
+        if not self.local_classifier:
+            return "ขออภัยค่ะ ระบบจำแนกโรคไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง"
+
         try:
-            image_base64 = ImageProcessor.encode_image_from_path(image_path)
-        except Exception as e:
-            return f"Error processing image: {str(e)}"
+            # Use local classifier for disease classification
+            classification_result = self.local_classifier.predict(image_path, top_k=3)
 
-        # For now, use direct LLM call for image analysis since CrewAI context might not work properly with vision
-        try:
-            # Create the message with image for Claude vision
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"""Analyze this sugarcane image for disease symptoms. Look for:
-- Leaf discoloration (yellowing, browning, reddening)
-- Lesions, spots, or streaks on leaves
-- Wilting or drooping
-- Root rot or stem damage
-- Fungal growth or mold
-- Insect damage signs
-- Nutrient deficiency symptoms
+            # Format the classification result
+            disease_info = self._format_classification_result(classification_result, user_description)
 
-User description: {user_description}
+            # Get additional advice from RAG
+            rag_query = f"โรคใบอ้อย {classification_result['top_prediction']['class']} อาการและการรักษา"
+            rag_response = self.rag_tool._run(rag_query)
 
-Provide a detailed description of what you see in the image."""
-                        },
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": image_base64
-                            }
-                        }
-                    ]
-                }
-            ]
-
-            # Call Claude directly for image analysis
-            response = self.llm.invoke(messages)
-            image_analysis = str(response)
-
-            # Now use CrewAI for the remaining tasks with the analysis result
-            return self._process_with_crew(image_analysis, user_description)
+            # Combine results and generate comprehensive advice
+            return self._generate_comprehensive_advice(disease_info, rag_response, user_description)
 
         except Exception as e:
-            print(f"Error in direct LLM call: {e}")
-            # Fallback to CrewAI approach
-            return self._process_with_crew_fallback(image_base64, user_description)
+            print(f"Error in disease classification: {e}")
+            return f"ขออภัยค่ะ เกิดข้อผิดพลาดในการจำแนกโรค: {str(e)}"
 
-    def _process_with_crew(self, image_analysis: str, user_description: str) -> str:
-        """Process with CrewAI using the image analysis result"""
+    def _format_classification_result(self, result: dict, user_description: str = "") -> str:
+        """Format the classification result into readable text"""
+        top_pred = result['top_prediction']
 
-        # Task 2: Classify the disease based on symptoms
+        # Map English class names to Thai
+        class_name_map = {
+            "Healthy": "สุขภาพดี",
+            "Mosaic": "โรคใบไหม้ (Mosaic)",
+            "RedRot": "โรคแดงเน่า (Red Rot)",
+            "Rust": "โรคสนิม (Rust)",
+            "Yellow": "โรคใบเหลือง (Yellow Leaf)"
+        }
+
+        thai_class_name = class_name_map.get(top_pred['class'], top_pred['class'])
+
+        formatted = f"ผลการจำแนกโรค: {thai_class_name}\n"
+        formatted += f"ความมั่นใจ: {top_pred['confidence_percentage']}\n"
+
+        if len(result['all_predictions']) > 1:
+            formatted += "\nความเป็นไปได้อื่นๆ:\n"
+            for i, pred in enumerate(result['all_predictions'][1:], 1):
+                thai_name = class_name_map.get(pred['class'], pred['class'])
+                formatted += f"{i}. {thai_name}: {pred['confidence_percentage']}\n"
+
+        if user_description:
+            formatted += f"\nคำอธิบายจากผู้ใช้: {user_description}\n"
+
+        return formatted
+
+    def _generate_comprehensive_advice(self, disease_info: str, rag_response: str, user_description: str = "") -> str:
+        """Generate comprehensive advice using CrewAI with disease info and RAG knowledge"""
+
+        # Task 1: Analyze the disease classification
+        task1 = Task(
+            description=f"""
+            วิเคราะห์ผลการจำแนกโรคต่อไปนี้และให้คำอธิบายที่เข้าใจง่าย:
+
+            {disease_info}
+
+            ให้คำอธิบาย:
+            1. โรคนี้คืออะไร
+            2. อาการสำคัญที่เห็นได้
+            3. สาเหตุของโรค
+            4. ผลกระทบต่ออ้อย
+            """,
+            expected_output="คำอธิบายโรคที่เข้าใจง่ายในภาษาไทย",
+            agent=self.disease_analyzer
+        )
+
+        # Task 2: Provide treatment recommendations using RAG knowledge
         task2 = Task(
             description=f"""
-            Based on this visual analysis of the sugarcane image: '{image_analysis}'
+            จากข้อมูลการจำแนกโรคและความรู้เพิ่มเติม ให้คำแนะนำการรักษาและป้องกัน:
 
-            Classify the sugarcane disease.
+            ข้อมูลการจำแนก: {disease_info}
 
-            Common sugarcane diseases in Thailand:
-            1. Pokkah Boeng (Pokkah disease) - White stripe on leaves
-            2. Leaf scald - Water-soaked lesions
-            3. Red rot - Red discoloration in stalks
-            4. Wilt disease - Sudden wilting
-            5. Rust disease - Orange pustules on leaves
-            6. Smut disease - Black whip-like structures
-            7. Mosaic virus - Yellow/green mottling
-            8. Leaf blight - Brown lesions
-            9. Eyespot disease - Small circular spots
-            10. Downy mildew - White fungal growth
+            ความรู้จากระบบ: {rag_response}
 
-            User description: {user_description}
+            ให้คำแนะนำที่ครอบคลุม:
+            1. วิธีการรักษาทันที
+            2. การป้องกันในอนาคต
+            3. การจัดการแปลง
+            4. แนวทางปฏิบัติที่ดี
 
-            Provide:
-            - Disease name
-            - Confidence level
-            - Key symptoms that match
-            - Differential diagnosis (why not other diseases)
+            จัดรูปแบบให้เป็นข้อความที่อ่านง่ายและปฏิบัติได้จริง
             """,
-            expected_output="Disease classification with confidence level and reasoning",
-            agent=self.disease_classifier
-        )
-
-        # Task 3: Provide treatment recommendations
-        task3 = Task(
-            description="""Based on the disease classification, provide comprehensive treatment recommendations.
-
-Include:
-1. Immediate actions to contain the disease
-2. Chemical treatments (if appropriate)
-3. Cultural practices to prevent spread
-4. Prevention strategies for the future
-5. Monitoring recommendations
-
-Structure the response with numbered points for clarity.
-Use Thai language for the final recommendations.""",
-            expected_output="Structured treatment recommendations in Thai with numbered points",
-            agent=self.advisor_agent
+            expected_output="คำแนะนำการรักษาและป้องกันที่ครอบคลุมในภาษาไทย",
+            agent=self.treatment_advisor
         )
 
         # Create and run the crew
         crew = Crew(
-            agents=[self.disease_classifier, self.advisor_agent],
-            tasks=[task2, task3],
-            verbose=True,
-            planning=False
-        )
-
-        result = crew.kickoff()
-
-        # Extract the final result
-        if hasattr(result, 'final_output'):
-            return str(result.final_output)
-        elif hasattr(result, 'output'):
-            return str(result.output)
-        elif hasattr(result, 'raw'):
-            return str(result.raw)
-        else:
-            return str(result)
-
-    def _process_with_crew_fallback(self, image_base64: str, user_description: str) -> str:
-        """Fallback method using CrewAI context approach"""
-
-        # Task 1: Analyze the image for disease symptoms
-        image_analysis_prompt = f"""
-        Analyze this sugarcane image for disease symptoms. Look for:
-        - Leaf discoloration (yellowing, browning, reddening)
-        - Lesions, spots, or streaks on leaves
-        - Wilting or drooping
-        - Root rot or stem damage
-        - Fungal growth or mold
-        - Insect damage signs
-        - Nutrient deficiency symptoms
-
-        User description: {user_description}
-
-        Provide a detailed description of what you see in the image.
-        """
-
-        task1 = Task(
-            description=image_analysis_prompt,
-            expected_output="Detailed visual analysis of disease symptoms observed in the sugarcane image",
-            agent=self.image_analyzer,
-            context=[{
-                "description": "Sugarcane plant image for disease analysis",
-                "expected_output": "Visual analysis of plant symptoms",
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": image_base64
-                }
-            }]
-        )
-
-        # Task 2: Classify the disease based on symptoms
-        task2 = Task(
-            description="""Based on the visual analysis from Task 1, classify the sugarcane disease.
-
-Common sugarcane diseases in Thailand:
-1. Pokkah Boeng (Pokkah disease) - White stripe on leaves
-2. Leaf scald - Water-soaked lesions
-3. Red rot - Red discoloration in stalks
-4. Wilt disease - Sudden wilting
-5. Rust disease - Orange pustules on leaves
-6. Smut disease - Black whip-like structures
-7. Mosaic virus - Yellow/green mottling
-8. Leaf blight - Brown lesions
-9. Eyespot disease - Small circular spots
-10. Downy mildew - White fungal growth
-
-Provide:
-- Disease name
-- Confidence level
-- Key symptoms that match
-- Differential diagnosis (why not other diseases)""",
-            expected_output="Disease classification with confidence level and reasoning",
-            agent=self.disease_classifier
-        )
-
-        # Task 3: Provide treatment recommendations
-        task3 = Task(
-            description="""Based on the disease classification, provide comprehensive treatment recommendations.
-
-Include:
-1. Immediate actions to contain the disease
-2. Chemical treatments (if appropriate)
-3. Cultural practices to prevent spread
-4. Prevention strategies for the future
-5. Monitoring recommendations
-
-Structure the response with numbered points for clarity.
-Use Thai language for the final recommendations.""",
-            expected_output="Structured treatment recommendations in Thai with numbered points",
-            agent=self.advisor_agent
-        )
-
-        # Create and run the crew
-        crew = Crew(
-            agents=[self.image_analyzer, self.disease_classifier, self.advisor_agent],
-            tasks=[task1, task2, task3],
-            verbose=True,
-            planning=False
-        )
-
-        result = crew.kickoff()
-
-        # Extract the final result
-        if hasattr(result, 'final_output'):
-            return str(result.final_output)
-        elif hasattr(result, 'output'):
-            return str(result.output)
-        elif hasattr(result, 'raw'):
-            return str(result.raw)
-        else:
-            return str(result)
-
-        # Task 2: Classify the disease based on symptoms
-        task2 = Task(
-            description="""
-            Based on the visual analysis from Task 1, classify the sugarcane disease.
-
-            Common sugarcane diseases in Thailand:
-            1. Pokkah Boeng (Pokkah disease) - White stripe on leaves
-            2. Leaf scald - Water-soaked lesions
-            3. Red rot - Red discoloration in stalks
-            4. Wilt disease - Sudden wilting
-            5. Rust disease - Orange pustules on leaves
-            6. Smut disease - Black whip-like structures
-            7. Mosaic virus - Yellow/green mottling
-            8. Leaf blight - Brown lesions
-            9. Eyespot disease - Small circular spots
-            10. Downy mildew - White fungal growth
-
-            Provide:
-            - Disease name
-            - Confidence level
-            - Key symptoms that match
-            - Differential diagnosis (why not other diseases)
-            """,
-            expected_output="Disease classification with confidence level and reasoning",
-            agent=self.disease_classifier
-        )
-
-        # Task 3: Provide treatment recommendations
-        task3 = Task(
-            description="""
-            Based on the disease classification, provide comprehensive treatment recommendations.
-
-            Include:
-            1. Immediate actions to contain the disease
-            2. Chemical treatments (if appropriate)
-            3. Cultural practices to prevent spread
-            4. Prevention strategies for the future
-            5. Monitoring recommendations
-
-            Structure the response with numbered points for clarity.
-            Use Thai language for the final recommendations.
-            """,
-            expected_output="Structured treatment recommendations in Thai with numbered points",
-            agent=self.advisor_agent
-        )
-
-        # Create and run the crew
-        crew = Crew(
-            agents=[self.image_analyzer, self.disease_classifier, self.advisor_agent],
-            tasks=[task1, task2, task3],
-            verbose=True,
+            agents=[self.disease_analyzer, self.treatment_advisor],
+            tasks=[task1, task2],
+            verbose=False,
             planning=False
         )
 
@@ -383,9 +368,7 @@ def process_sugarcane_image(image_path: str, user_description: str = "") -> str:
 
 # Example usage
 if __name__ == "__main__":
-    # Test with a sample image (you would replace this with actual image data)
-    # image_path = "path/to/sugarcane_image.jpg"
-    # image_base64 = ImageProcessor.encode_image_from_path(image_path)
-    # result = process_sugarcane_image(image_base64, "The leaves are turning yellow")
+    # Test with a sample image
+    # result = process_sugarcane_image("path/to/image.jpg", "ใบเหลืองและมีจุด")
     # print(result)
-    print("Sugarcane Disease Classifier initialized. Use process_sugarcane_image() function.")
+    print("Sugarcane Disease Classifier with local ViT model initialized.")
