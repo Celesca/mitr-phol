@@ -11,7 +11,7 @@ class IntentClassifier:
     def __init__(self):
         # Initialize Claude for intent classification
         self.llm = LLM(
-            model="us.anthropic.claude-sonnet-4-20250514-v1:0",
+            model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
             aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
             aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
             aws_region_name="us-east-1"

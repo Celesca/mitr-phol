@@ -20,7 +20,7 @@ AWS_SECRET_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
 AWS_REGION = default_region
 
 # Use the bedrock_client created in the previous cell
-llm = LLM(model="us.anthropic.claude-sonnet-4-20250514-v1:0",
+llm = LLM(model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
           aws_access_key_id=AWS_ACCESS_KEY,
           aws_secret_access_key=AWS_SECRET_KEY,
           aws_region_name=default_region
