@@ -1,14 +1,21 @@
-import { useState, useEffect } from 'react'
-import './App.css'
+import React, { useState, useEffect } from 'react'
+import type { FarmData } from './services/farmData'
+import { fetchFarmData, THAILAND_CONFIG } from './services/farmData'
 
 // Import Leaflet components
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-// Import data service
-import type { FarmData } from './services/farmData'
-import { fetchFarmData, THAILAND_CONFIG } from './services/farmData'
+interface StructuredOutput {
+  extractedData: Array<{
+    question: string;
+    columnReference: string;
+    dataType: string;
+    extractedValue?: string | number;
+  }>;
+  selectedFarm?: FarmData;
+}
 
 // Fix for default markers in react-leaflet
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl
@@ -25,6 +32,13 @@ function App() {
   const [showFullSummary, setShowFullSummary] = useState(false)
   const [farmData, setFarmData] = useState<FarmData[]>([])
   const [loading, setLoading] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [transcribedText, setTranscribedText] = useState('')
+  const [interimText, setInterimText] = useState('')
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [structuredOutput, setStructuredOutput] = useState<StructuredOutput | null>(null)
+  const [uploadedAudio, setUploadedAudio] = useState<File | null>(null)
+  const [recognition, setRecognition] = useState<any>(null)
 
   // Load farm data on component mount
   useEffect(() => {
@@ -42,6 +56,167 @@ function App() {
 
     loadFarmData()
   }, [])
+
+  // Initialize speech recognition
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition
+      const recognitionInstance = new SpeechRecognition()
+      
+      recognitionInstance.continuous = true
+      recognitionInstance.interimResults = true
+      recognitionInstance.lang = 'th-TH' // Thai language
+      
+      recognitionInstance.onresult = (event: any) => {
+        let finalTranscript = ''
+        let interimTranscript = ''
+        
+        // Process all results from the last result index
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript
+          } else {
+            interimTranscript += transcript
+          }
+        }
+        
+        // Append final transcript to the main text
+        if (finalTranscript) {
+          setTranscribedText(prev => prev + finalTranscript)
+        }
+        
+        // Show interim text (this will be replaced as user continues speaking)
+        setInterimText(interimTranscript)
+      }
+      
+      recognitionInstance.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error)
+        setIsRecording(false)
+      }
+      
+      recognitionInstance.onend = () => {
+        setIsRecording(false)
+      }
+      
+      setRecognition(recognitionInstance)
+    }
+  }, [])
+
+  const startRecording = () => {
+    if (recognition && !isRecording) {
+      setTranscribedText('')
+      setIsRecording(true)
+      recognition.start()
+    }
+  }
+
+  const stopRecording = () => {
+    if (recognition && isRecording) {
+      recognition.stop()
+      setIsRecording(false)
+    }
+  }
+
+  const handleAudioUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      setUploadedAudio(file)
+      // For now, just set a placeholder text. In a real implementation,
+      // you would process the audio file for transcription
+      setTranscribedText(`อัปโหลดไฟล์เสียง: ${file.name} (จำลองการถอดเสียง)`)
+    }
+  }
+
+  const handleFinishTranscription = async () => {
+    if (!transcribedText.trim()) return
+    
+    setIsProcessing(true)
+    
+    // Simulate processing delay
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    
+    // Mock structured output generation
+    const mockStructuredOutput = {
+      extractedData: [
+        {
+          question: "ในรอบเดือนที่ผ่านมา ท่านให้น้ำอ้อยเฉลี่ยกี่ครั้งต่อเดือน?",
+          columnReference: "irrigation_frequency_per_month",
+          dataType: "ตัวเลข (ครั้ง)",
+          extractedValue: 12
+        },
+        {
+          question: "ในการเพาะปลูกรอบนี้ ท่านมีการทำร่องระบายน้ำหรือบริหารจัดการน้ำท่วมขัง (Drainage) อย่างไรบ้าง (มี/ไม่มี/เป็นบางส่วน)?",
+          columnReference: "drainage_effort_encoded",
+          dataType: "ตัวเลือก",
+          extractedValue: "มี"
+        },
+        {
+          question: "ในรอบการเพาะปลูกที่ผ่านมา ท่านใช้ปุ๋ยไนโตรเจน (N) รวมแล้วประมาณกี่กิโลกรัมต่อไร่?",
+          columnReference: "total_N_kg_per_rai",
+          dataType: "ตัวเลข (กก./ไร่)",
+          extractedValue: 45
+        },
+        {
+          question: "และใช้ปุ๋ยโพแทสเซียม (K) รวมแล้วประมาณกี่กิโลกรัมต่อไร่?",
+          columnReference: "total_K_kg_per_rai",
+          dataType: "ตัวเลข (กก./ไร่)",
+          extractedValue: 25
+        },
+        {
+          question: "ท่านมีการฉีดพ่นปุ๋ยทางใบ (Foliar Spray) เฉลี่ยกี่ครั้งต่อเดือนในช่วงที่ผ่านมา?",
+          columnReference: "foliar_spray_frequency_per_month",
+          dataType: "ตัวเลข (ครั้ง/เดือน)",
+          extractedValue: 2
+        },
+        {
+          question: "ท่านมีการลอกกาบใบอ้อย (Leaf Stripping) เฉลี่ยกี่ครั้งต่อเดือน?",
+          columnReference: "leaf_stripping_frequency_per_month",
+          dataType: "ตัวเลข (ครั้ง/เดือน)",
+          extractedValue: 3
+        },
+        {
+          question: "ท่านมีการพูนโคน/ยกร่อง (Hilling Up) เพื่อช่วยการแตกกอและการระบายน้ำหรือไม่ (มี/ไม่มี/บางส่วน)?",
+          columnReference: "hilling_up_encoded",
+          dataType: "ตัวเลือก",
+          extractedValue: "บางส่วน"
+        },
+        {
+          question: "ในการเตรียมดิน/จัดการวัชพืช ท่านมีการไถพรวน/พรวนดิน (Cultivation) รวมกี่ครั้งตลอดรอบการเพาะปลูกนี้?",
+          columnReference: "cultivation_frequency_per_cycle",
+          dataType: "ตัวเลข (ครั้ง/รอบ)",
+          extractedValue: 4
+        },
+        {
+          question: "ท่านมีการฉีดพ่นยาป้องกัน (Preventive Spraying) โรค/แมลง กี่ครั้งต่อรอบการเพาะปลูก?",
+          columnReference: "preventive_spraying_frequency",
+          dataType: "ตัวเลข (ครั้ง/รอบ)",
+          extractedValue: 6
+        },
+        {
+          question: "โดยรวมแล้ว สารกำจัดศัตรูพืชที่ท่านใช้ มีระดับความเป็นพิษเป็นอย่างไร (เช่น ต่ำ, ปานกลาง, สูง)?",
+          columnReference: "pesticide_toxicity_level",
+          dataType: "ตัวเลือก (ระดับ)",
+          extractedValue: "ปานกลาง"
+        }
+      ],
+      selectedFarm: undefined
+    }
+    
+    setStructuredOutput(mockStructuredOutput)
+    setIsProcessing(false)
+  }
+
+  const resetTranscription = () => {
+    setTranscribedText('')
+    setInterimText('')
+    setStructuredOutput(null)
+    setUploadedAudio(null)
+    setIsRecording(false)
+    if (recognition) {
+      recognition.stop()
+    }
+  }
 
   const handleMapClick = () => {
     setCurrentView('map')
@@ -339,7 +514,7 @@ function App() {
   if (currentView === 'survey') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 p-4">
-        <div className="max-w-md mx-auto">
+        <div className="max-w-4xl mx-auto">
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-4">
             <button
               onClick={handleBackToWelcome}
@@ -350,12 +525,274 @@ function App() {
               </svg>
               กลับ
             </button>
-            <h1 className="text-2xl font-bold text-gray-800 mb-4">แบบสอบถาม</h1>
-            <div className="space-y-4">
-              <div className="bg-gray-50 rounded-lg p-4">
-                <p className="text-gray-600">แบบสอบถามกำลังพัฒนา...</p>
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+                <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold text-gray-800 mb-2">ถอดเสียงและวิเคราะห์</h1>
+              <p className="text-gray-600">พูดหรืออัปโหลดไฟล์เสียงเพื่อวิเคราะห์สภาพแปลงอ้อย</p>
+            </div>
+
+            {/* Voice Recording Section */}
+            <div className="grid md:grid-cols-2 gap-4 mb-6">
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
+                <div className="flex items-center mb-4">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
+                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-800">บันทึกเสียงสด</h3>
+                </div>
+                <p className="text-sm text-gray-600 mb-4">คลิกเพื่อเริ่มบันทึกเสียงและพูดเกี่ยวกับสภาพแปลงอ้อยของคุณ</p>
+                <div className="flex items-center justify-center">
+                  <button
+                    onClick={isRecording ? stopRecording : startRecording}
+                    className={`flex items-center justify-center w-16 h-16 rounded-full font-medium transition-all duration-200 transform hover:scale-105 ${
+                      isRecording
+                        ? 'bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-200'
+                        : 'bg-blue-500 text-white hover:bg-blue-600 shadow-lg shadow-blue-200'
+                    }`}
+                  >
+                    {isRecording ? (
+                      <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                        <rect x="6" y="4" width="4" height="16"/>
+                        <rect x="14" y="4" width="4" height="16"/>
+                      </svg>
+                    ) : (
+                      <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 1 14.14 0"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <div className="text-center mt-3">
+                  {isRecording ? (
+                    <div className="flex items-center justify-center text-red-600">
+                      <div className="w-3 h-3 bg-red-500 rounded-full mr-2 animate-pulse"></div>
+                      <span className="text-sm font-medium">กำลังบันทึก...</span>
+                    </div>
+                  ) : (
+                    <span className="text-sm text-gray-500">คลิกเพื่อเริ่มบันทึก</span>
+                  )}
+                </div>
+                {!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window) && (
+                  <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                    <p className="text-sm text-orange-700 text-center">
+                      ⚠️ เบราว์เซอร์นี้ไม่รองรับการบันทึกเสียง<br/>
+                      กรุณาใช้อัปโหลดไฟล์เสียงแทน
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Audio Upload Section */}
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200">
+                <div className="flex items-center mb-4">
+                  <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mr-3">
+                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-800">อัปโหลดไฟล์เสียง</h3>
+                </div>
+                <p className="text-sm text-gray-600 mb-4">เลือกไฟล์เสียงที่บันทึกไว้เพื่อทำการถอดเสียง</p>
+                <div className="text-center">
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={handleAudioUpload}
+                    className="hidden"
+                    id="audio-upload"
+                  />
+                  <label
+                    htmlFor="audio-upload"
+                    className="inline-flex items-center px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer transition-colors shadow-md hover:shadow-lg"
+                  >
+                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    เลือกไฟล์เสียง
+                  </label>
+                  {uploadedAudio && (
+                    <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded-lg">
+                      <p className="text-sm text-green-800">📁 {uploadedAudio.name}</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* Transcription Display */}
+            {(transcribedText || interimText) && (
+              <div className="bg-blue-50 rounded-lg p-4 mb-6">
+                <h3 className="text-lg font-medium text-gray-800 mb-3">ข้อความที่ถอดได้:</h3>
+                <div className="bg-white rounded-lg p-3 border min-h-[100px] max-h-[200px] overflow-y-auto">
+                  <p className="text-gray-700 whitespace-pre-wrap">
+                    {transcribedText}
+                    {interimText && (
+                      <span className="text-gray-500 italic">{interimText}</span>
+                    )}
+                  </p>
+                  {isRecording && (
+                    <div className="flex items-center mt-2 text-sm text-blue-600">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
+                      กำลังฟัง...
+                    </div>
+                  )}
+                </div>
+                <div className="flex space-x-3 mt-3">
+                  <button
+                    onClick={handleFinishTranscription}
+                    disabled={isProcessing || (!transcribedText.trim() && !interimText.trim())}
+                    className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                        </svg>
+                        กำลังวิเคราะห์...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        เสร็จสิ้น
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={resetTranscription}
+                    className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                  >
+                    ล้างข้อมูล
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Structured Output Display */}
+            {structuredOutput && (
+              <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl p-6 border border-purple-200">
+                <div className="flex items-center mb-4">
+                  <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
+                    <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-800">ผลการวิเคราะห์ข้อมูล</h3>
+                </div>
+
+                {/* Farm Selection */}
+                <div className="bg-white rounded-lg border border-gray-200 shadow-sm mb-6">
+                  <div className="px-4 py-3 border-b border-gray-200">
+                    <h4 className="text-lg font-semibold text-gray-800">เลือกแปลงอ้อย</h4>
+                  </div>
+                  <div className="p-4">
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        ค้นหาและเลือกแปลงอ้อย
+                      </label>
+                      <select
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        value={structuredOutput.selectedFarm?.farm_id || ''}
+                        onChange={(e) => {
+                          const selectedFarmId = e.target.value
+                          const selectedFarm = farmData.find(farm => farm.farm_id === selectedFarmId)
+                          setStructuredOutput(prev => prev ? {
+                            ...prev,
+                            selectedFarm: selectedFarm
+                          } : null)
+                        }}
+                      >
+                        <option value="">เลือกแปลงอ้อย...</option>
+                        {farmData.map((farm) => (
+                          <option key={farm.farm_id} value={farm.farm_id}>
+                            {farm.farm_id} - {farm.farmer_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {structuredOutput.selectedFarm && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                        <div className="flex items-center">
+                          <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
+                            </svg>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-green-800">
+                              เลือกแล้ว: {structuredOutput.selectedFarm.farm_id} - {structuredOutput.selectedFarm.farmer_name}
+                            </p>
+                            <p className="text-xs text-green-600 mt-1">
+                              ข้อมูลการถอดเสียงจะถูกบันทึกสำหรับแปลงนี้
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Extracted Data Table */}
+                <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+                  <div className="px-4 py-3 border-b border-gray-200">
+                    <h4 className="text-lg font-semibold text-gray-800">ข้อมูลที่ได้จากการถอดเสียง</h4>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            คำถามที่ถามเกษตรกร
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            ข้อมูลที่ต้องการ (Column Reference)
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            ประเภทข้อมูล
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            ค่าที่ได้
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {structuredOutput.extractedData.map((item, index) => (
+                          <tr key={index} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                            <td className="px-6 py-4 text-sm text-gray-900">
+                              {item.question}
+                            </td>
+                            <td className="px-6 py-4 text-sm font-mono text-blue-600">
+                              {item.columnReference}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-700">
+                              {item.dataType}
+                            </td>
+                            <td className="px-6 py-4 text-sm font-semibold text-green-600">
+                              {item.extractedValue !== undefined ? (
+                                typeof item.extractedValue === 'number' ? 
+                                  item.extractedValue : 
+                                  item.extractedValue
+                              ) : (
+                                <span className="text-gray-400">ไม่ได้ระบุ</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
