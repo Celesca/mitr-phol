@@ -228,7 +228,7 @@ class SugarcaneDiseaseClassifier:
             role="Disease Analysis Specialist",
             goal="Analyze disease classification results and provide detailed explanations",
             backstory="I am an expert in sugarcane diseases who can interpret classification results and explain what they mean for farmers.",
-            verbose=False
+            verbose=True
         )
 
         self.treatment_advisor = Agent(
@@ -236,7 +236,7 @@ class SugarcaneDiseaseClassifier:
             role="Treatment and Prevention Advisor",
             goal="Provide practical treatment recommendations and prevention strategies",
             backstory="I am a sugarcane disease management expert who provides actionable advice for treating and preventing sugarcane diseases.",
-            verbose=False
+            verbose=True
         )
 
     def classify_disease_from_image(self, image_path: str = None, user_description: str = "") -> str:

@@ -29,7 +29,8 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # Store active conversations and pending image classifications
 active_conversations = set()
-pending_images = {}  # user_id -> {'image_base64': str, 'timestamp': datetime}
+pending_images = {}  # user_id -> {'image_path': str, 'timestamp': datetime}
+processed_images = {}  # user_id -> {'image_path': str, 'timestamp': datetime, 'description': str}
 
 def download_image(message_id: str) -> str:
     """Download image from LINE and save to local file, return file path"""
@@ -73,15 +74,38 @@ def cleanup_old_pending_images():
                 image_path = data['image_path']
                 if os.path.exists(image_path):
                     os.remove(image_path)
-                    print(f"Deleted old image file: {image_path}")
+                    print(f"Deleted old pending image file: {image_path}")
                 else:
-                    print(f"Image file not found for cleanup: {image_path}")
+                    print(f"Pending image file not found for cleanup: {image_path}")
             except Exception as e:
-                print(f"Error deleting image file {data['image_path']}: {e}")
+                print(f"Error deleting pending image file {data['image_path']}: {e}")
 
     # Remove expired entries
     for user_id in expired_users:
         del pending_images[user_id]
+
+def cleanup_old_processed_images():
+    """Remove processed images older than 1 hour and their files"""
+    current_time = datetime.now()
+    expired_users = []
+
+    for user_id, data in processed_images.items():
+        if current_time - data['timestamp'] > timedelta(hours=1):
+            expired_users.append(user_id)
+            # Delete the image file
+            try:
+                image_path = data['image_path']
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                    print(f"Deleted old processed image file: {image_path}")
+                else:
+                    print(f"Processed image file not found for cleanup: {image_path}")
+            except Exception as e:
+                print(f"Error deleting processed image file {data['image_path']}: {e}")
+
+    # Remove expired entries
+    for user_id in expired_users:
+        del processed_images[user_id]
 
 def process_message(user_id, user_message):
     """Process user message and return response"""
@@ -308,4 +332,11 @@ def handle_image_message(event):
         )
 
 if __name__ == "__main__":
+    # Start cleanup threads
+    cleanup_thread = threading.Thread(target=cleanup_old_pending_images, daemon=True)
+    cleanup_thread.start()
+    
+    processed_cleanup_thread = threading.Thread(target=cleanup_old_processed_images, daemon=True)
+    processed_cleanup_thread.start()
+    
     app.run(host='0.0.0.0', port=5000, debug=True)
