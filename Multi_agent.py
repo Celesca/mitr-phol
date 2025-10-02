@@ -14,17 +14,20 @@ query_cache = {}
 CACHE_MAX_SIZE = 100
 CACHE_TTL = 3600  # 1 hour TTL
 
-default_region = "us-east-1"
-AWS_ACCESS_KEY = os.environ.get('AWS_ACCESS_KEY_ID')
-AWS_SECRET_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
-AWS_REGION = default_region
+# default_region = "us-east-1"
+# AWS_ACCESS_KEY = os.environ.get('AWS_ACCESS_KEY_ID')
+# AWS_SECRET_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+# AWS_REGION = default_region
 
-# Use the bedrock_client created in the previous cell
-llm = LLM(model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
-          aws_access_key_id=AWS_ACCESS_KEY,
-          aws_secret_access_key=AWS_SECRET_KEY,
-          aws_region_name=default_region
-        )
+# # Use the bedrock_client created in the previous cell
+# llm = LLM(model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+#           aws_access_key_id=AWS_ACCESS_KEY,
+#           aws_secret_access_key=AWS_SECRET_KEY,
+#           aws_region_name=default_region
+#         )
+
+llm = LLM(model="ollama/qwen/qwen3:14b", 
+          base_url="http://localhost:11434")
 
 rag_tool = RAGSearchTool()
 

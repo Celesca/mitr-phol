@@ -52,7 +52,7 @@ class RAGSearchTool(BaseTool):
 
     # NOTE: You must build BM25 index during preprocessing and load docs here
     bm25: ClassVar = BM25Retriever.from_documents(all_chunks)  # placeholder
-    dense: ClassVar = vectorstore.as_retriever(search_kwargs={"k": 3})
+    dense: ClassVar = vectorstore.as_retriever(search_kwargs={"k": 5})
     hybrid_retriever: ClassVar = EnsembleRetriever(
         retrievers=[bm25, dense], weights=[0.3, 0.7]
     )
@@ -90,7 +90,7 @@ class RAGSearchTool(BaseTool):
                 filename = doc.metadata['filename']
                 # Remove .pdf extension if present
                 if filename.lower().endswith('.pdf'):
-                    filename = filename[:-3]
+                    filename = filename[:-4]
                 document_sources.add(filename)
 
         # Format the main content
