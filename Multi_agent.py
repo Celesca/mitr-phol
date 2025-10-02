@@ -13,7 +13,7 @@ AWS_SECRET_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
 AWS_REGION = default_region
 
 # Use the bedrock_client created in the previous cell
-llm = LLM(model="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+llm = LLM(model="us.anthropic.claude-sonnet-4-20250514-v1:0",
           aws_access_key_id=AWS_ACCESS_KEY,
           aws_secret_access_key=AWS_SECRET_KEY,
           aws_region_name=default_region
@@ -114,6 +114,14 @@ def crew_infer(question_text: str) -> str:
     )
 
     result = crew.kickoff()
+
+    # Check if RAG search found no relevant documents
+    # Extract the retriever result from task2
+    if hasattr(result, 'tasks_output') and len(result.tasks_output) >= 2:
+        retriever_output = str(result.tasks_output[1].output)
+        if "No relevant documents found" in retriever_output or retriever_output.strip() == "":
+            return "โปรดถามเจ้าหน้าที่ที่ชำนาญ\n/ปรึกษาผู้เชี่ยวชาญ"
+
     # Extract the actual text result from CrewOutput
 
     # Handle different CrewAI result formats

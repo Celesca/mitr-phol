@@ -1,11 +1,15 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import MessageEvent, TextMessage, ImageMessage, TextSendMessage
 import os
 from dotenv import load_dotenv
 import threading
+import requests
+import uuid
+from datetime import datetime, timedelta
 from Multi_agent import crew_infer
+from Image_agent import process_sugarcane_image, ImageProcessor
 
 # Load environment variables
 load_dotenv()
@@ -22,8 +26,39 @@ if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_CHANNEL_SECRET:
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# Store active conversations to prevent multiple simultaneous requests
+# Store active conversations and pending image classifications
 active_conversations = set()
+pending_images = {}  # user_id -> {'image_base64': str, 'timestamp': datetime}
+
+def download_image(message_id: str) -> str:
+    """Download image from LINE and return base64 encoded data"""
+    try:
+        # Get image content
+        message_content = line_bot_api.get_message_content(message_id)
+
+        # Read image data
+        image_data = b""
+        for chunk in message_content.iter_content():
+            image_data += chunk
+
+        # Encode to base64
+        import base64
+        image_base64 = base64.b64encode(image_data).decode('utf-8')
+
+        return image_base64
+    except Exception as e:
+        print(f"Error downloading image: {e}")
+        return None
+
+def cleanup_old_pending_images():
+    """Remove pending images older than 10 minutes"""
+    current_time = datetime.now()
+    expired_users = [
+        user_id for user_id, data in pending_images.items()
+        if current_time - data['timestamp'] > timedelta(minutes=10)
+    ]
+    for user_id in expired_users:
+        del pending_images[user_id]
 
 def process_message(user_id, user_message):
     """Process user message and return response"""
@@ -61,56 +96,144 @@ def callback():
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
+def handle_text_message(event):
     """Handle incoming text messages"""
     user_id = event.source.user_id
     user_message = event.message.text.strip()
 
-    # Check if user already has an active conversation
-    if user_id in active_conversations:
+    # Clean up old pending images
+    cleanup_old_pending_images()
+
+    # Check if user has a pending image for classification
+    if user_id in pending_images:
+        # This is a description for an image classification
+        image_data = pending_images[user_id]['image_base64']
+
+        # Remove from pending images
+        del pending_images[user_id]
+
+        # Check if user already has an active conversation
+        if user_id in active_conversations:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="กำลังประมวลผลคำถามก่อนหน้านี้อยู่ค่ะ กรุณารอสักครู่...")
+            )
+            return
+
+        # Add to active conversations
+        active_conversations.add(user_id)
+
+        # Send initial waiting message
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="กำลังประมวลผลคำถามก่อนหน้านี้อยู่ค่ะ กรุณารอสักครู่...")
+            TextSendMessage(text="รอสักครู่ค่ะ กำลังวิเคราะห์รูปภาพและจำแนกโรค...")
         )
-        return
 
-    # Add to active conversations
-    active_conversations.add(user_id)
+        # Process image classification in background thread
+        def background_process():
+            try:
+                response = process_sugarcane_image(image_data, user_message)
+                print(f"Image classification response: {str(response)[:200]}")
 
-    # Send initial waiting message
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text="รอสักครู่ค่ะ กำลังเตรียมคำตอบ...")
-    )
+                # Send the final response
+                line_bot_api.push_message(
+                    user_id,
+                    TextSendMessage(text=str(response))
+                )
+                print("Image classification result sent successfully")
+            except Exception as e:
+                print(f"Error in image classification: {e}")
+                try:
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text="ขออภัยค่ะ เกิดข้อผิดพลาดในการวิเคราะห์รูปภาพ")
+                    )
+                except:
+                    pass
+            finally:
+                active_conversations.discard(user_id)
 
-    # Process message in background thread
-    def background_process():
-        response = process_message(user_id, user_message)
-        print(f"Final response type: {type(response)}")
-        print(f"Final response (first 200 chars): {str(response)[:200]}")
+        # Start background thread
+        thread = threading.Thread(target=background_process)
+        thread.daemon = True
+        thread.start()
 
-        # Send the final response
-        try:
-            line_bot_api.push_message(
-                user_id,
-                TextSendMessage(text=str(response))
+    else:
+        # This is a regular text question
+        # Check if user already has an active conversation
+        if user_id in active_conversations:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="กำลังประมวลผลคำถามก่อนหน้านี้อยู่ค่ะ กรุณารอสักครู่...")
             )
-            print("Message sent successfully")
-        except Exception as e:
-            print(f"Error sending message: {e}")
-            # Try to send error message
+            return
+
+        # Add to active conversations
+        active_conversations.add(user_id)
+
+        # Send initial waiting message
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="รอสักครู่ค่ะ กำลังเตรียมคำตอบ...")
+        )
+
+        # Process message in background thread
+        def background_process():
+            response = process_message(user_id, user_message)
+            print(f"Final response type: {type(response)}")
+            print(f"Final response (first 200 chars): {str(response)[:200]}")
+
+            # Send the final response
             try:
                 line_bot_api.push_message(
                     user_id,
-                    TextSendMessage(text="ขออภัยค่ะ เกิดข้อผิดพลาดในการส่งข้อความ")
+                    TextSendMessage(text=str(response))
                 )
-            except:
-                pass
+                print("Message sent successfully")
+            except Exception as e:
+                print(f"Error sending message: {e}")
+                # Try to send error message
+                try:
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text="ขออภัยค่ะ เกิดข้อผิดพลาดในการส่งข้อความ")
+                    )
+                except:
+                    pass
+            finally:
+                active_conversations.discard(user_id)
 
-    # Start background thread
-    thread = threading.Thread(target=background_process)
-    thread.daemon = True
-    thread.start()
+        # Start background thread
+        thread = threading.Thread(target=background_process)
+        thread.daemon = True
+        thread.start()
+
+@handler.add(MessageEvent, message=ImageMessage)
+def handle_image_message(event):
+    """Handle incoming image messages"""
+    user_id = event.source.user_id
+    message_id = event.message.id
+
+    # Download and encode the image
+    image_base64 = download_image(message_id)
+
+    if image_base64:
+        # Store the image for later classification
+        pending_images[user_id] = {
+            'image_base64': image_base64,
+            'timestamp': datetime.now()
+        }
+
+        # Ask for description
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="ได้รับรูปภาพแล้วค่ะ! กรุณาบอกรายละเอียดเพิ่มเติม เช่น อาการที่เห็น หรือคำถามเกี่ยวกับรูปภาพนี้")
+        )
+    else:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="ขออภัยค่ะ ไม่สามารถดาวน์โหลดรูปภาพได้ กรุณาลองส่งรูปภาพใหม่อีกครั้ง")
+        )
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000, debug=True)

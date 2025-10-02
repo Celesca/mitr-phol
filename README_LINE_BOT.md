@@ -1,6 +1,28 @@
 # Sugarcane Farmer Assistant LINE Bot
 
-A LINE chatbot that provides sugarcane farming advice using AI multi-agent system.
+A LINE chatbot that provides sugarcane farming advice using AI multi-agent system with multimodal image analysis.
+
+## Features
+
+- **Text-based Q&A**: Answer sugarcane farming questions using RAG and multi-agent AI
+- **Image Disease Classification**: Upload sugarcane images to identify diseases using Claude Sonnet 4 vision
+- **Thai Language Support**: Provides advice in Thai for farmers
+- **Structured Responses**: Answers formatted with numbered points for clarity
+- **Async Processing**: Handles multiple conversations simultaneously
+
+## How to Use
+
+### Text Questions
+Simply send any sugarcane farming question in Thai or English:
+- "พันธุ์อ้อยที่ทนโรคใบด่าง"
+- "วิธีการปลูกอ้อยที่ดีที่สุด"
+- "โรคที่พบบ่อยในอ้อย"
+
+### Image Classification
+1. **Send an image** of sugarcane showing symptoms
+2. **Bot responds**: "ได้รับรูปภาพแล้วค่ะ! กรุณาบอกรายละเอียดเพิ่มเติม เช่น อาการที่เห็น หรือคำถามเกี่ยวกับรูปภาพนี้"
+3. **Send text description** like "ใบเหลือง" or "มีจุดด่างๆ"
+4. **Bot analyzes** and provides disease classification with treatment recommendations
 
 ## Setup Instructions
 
@@ -34,23 +56,19 @@ LINE_SECRET_CHANNEL=your_channel_secret_here
 python run_bot.py
 ```
 
-## Features
+## Supported Diseases
 
-- **Multi-Agent AI System**: Uses CrewAI with specialized agents for classification, retrieval, and advice generation
-- **RAG Integration**: Retrieves relevant information from sugarcane knowledge base
-- **Thai Language Support**: Provides advice in Thai for farmers
-- **Structured Responses**: Answers formatted with numbered points for clarity
-- **Async Processing**: Handles multiple conversations simultaneously
-
-## How It Works
-
-1. User sends a question via LINE
-2. Bot immediately responds with "รอสักครู่ค่ะ กำลังเตรียมคำตอบ..." (Please wait, preparing answer...)
-3. Question is processed by the multi-agent system:
-   - **Classifier Agent**: Categorizes the question
-   - **Retriever Agent**: Searches knowledge base using RAG
-   - **Advisor Agent**: Provides structured advice in Thai
-4. Final answer is sent back to the user
+The bot can identify common sugarcane diseases including:
+- Pokkah Boeng (Pokkah disease)
+- Leaf scald
+- Red rot
+- Wilt disease
+- Rust disease
+- Smut disease
+- Mosaic virus
+- Leaf blight
+- Eyespot disease
+- Downy mildew
 
 ## Environment Variables
 
@@ -59,9 +77,25 @@ python run_bot.py
 - `AWS_ACCESS_KEY_ID`: AWS access key for Bedrock
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for Bedrock
 
+## Architecture
+
+### Multi-Agent System
+- **Classifier Agent**: Categorizes questions into sugarcane topics
+- **Retriever Agent**: Searches knowledge base using RAG
+- **Advisor Agent**: Provides structured advice in Thai
+- **Image Analyzer Agent**: Analyzes visual symptoms in sugarcane images
+- **Disease Classifier Agent**: Identifies specific diseases and provides treatment
+
+### Image Processing Flow
+1. User uploads image → Stored temporarily
+2. User provides description → Image + text sent to Claude Sonnet 4
+3. Multi-agent analysis → Disease identification and recommendations
+4. Structured response → Sent back to user
+
 ## Troubleshooting
 
 - Make sure all environment variables are set in `.env` file
 - Verify LINE channel is properly configured
 - Check webhook URL is accessible from LINE servers
 - Ensure all dependencies are installed
+- For image processing, ensure images are clear and well-lit
