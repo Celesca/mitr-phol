@@ -34,13 +34,21 @@ class IntentClassifier:
             message: The user's message text
 
         Returns:
-            Intent category: "NATURAL", "NORMALRAG", or "LOCALIZE"
+            Intent category: "NATURAL", "NORMALRAG", "LOCALIZE", "REPORT", or "STATUS_UPDATE"
         """
 
-        # Use AI classification for all cases
+        # Check for exact report request first
+        if message.strip() == "ขอรายงาน":
+            return "REPORT"
+
+        # Check for status update messages
+        if message.strip() in ["ฉันเปลี่ยนแล้วเป็นรดน้ำสามวัน", "รับทราบ"]:
+            return "STATUS_UPDATE"
+
+        # Use AI classification for all other cases
         task = Task(
             description=f"""
-            Classify this user message into one of three intent categories:
+            Classify this user message into one of five intent categories:
 
             Message: "{message}"
 
@@ -51,9 +59,13 @@ class IntentClassifier:
 
             3. LOCALIZE - Questions that require specific farmer data, location-based information, or personalized recommendations. Examples: "ที่นี่อ้อยเป็นยังไง", "อ้อยของฉัน", "ที่บ้านฉัน", "แปลงของฉัน"
 
-            Return ONLY the intent category name (NATURAL, NORMALRAG, or LOCALIZE) without any explanation.
+            4. REPORT - Requests for weekly reports or summaries. Examples: "ขอรายงาน", "รายงานประจำสัปดาห์"
+
+            5. STATUS_UPDATE - Confirmations or updates about implementing suggested changes. Examples: "ฉันเปลี่ยนแล้ว", "รับทราบแล้ว", "ทำตามแล้ว"
+
+            Return ONLY the intent category name (NATURAL, NORMALRAG, LOCALIZE, REPORT, or STATUS_UPDATE) without any explanation.
             """,
-            expected_output="One of: NATURAL, NORMALRAG, LOCALIZE",
+            expected_output="One of: NATURAL, NORMALRAG, LOCALIZE, REPORT, STATUS_UPDATE",
             agent=self.classifier_agent
         )
 
@@ -80,7 +92,7 @@ class IntentClassifier:
         intent = intent.upper().replace("INTENT:", "").replace("CATEGORY:", "").strip()
 
         # Validate and default to NORMALRAG if unclear
-        if intent not in ["NATURAL", "NORMALRAG", "LOCALIZE"]:
+        if intent not in ["NATURAL", "NORMALRAG", "LOCALIZE", "REPORT", "STATUS_UPDATE"]:
             # Additional fallback logic
             if any(word in message.lower() for word in ['ฉัน', 'บ้าน', 'ที่นี่', 'แปลง', 'ฟาร์ม', 'ไร่']):
                 return "LOCALIZE"

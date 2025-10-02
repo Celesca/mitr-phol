@@ -130,6 +130,18 @@ def process_message(user_id, user_message):
             # Localized/farmer-specific data - mock response for now
             return "ขออภัยค่ะ ขณะนี้ระบบยังไม่รองรับการวิเคราะห์ข้อมูลเฉพาะบุคคลหรือพื้นที่ กรุณาถามคำถามทั่วไปเกี่ยวกับอ้อย หรือติดต่อเจ้าหน้าที่ที่ชำนาญโดยตรง /ปรึกษาผู้เชี่ยวชาญ"
 
+        elif intent == "REPORT":
+            # Weekly report/summary request
+            return """สวัสดีค่ะ วันนี้มิตรจังมีเคล็ดลับมาแจ้ง ถ้าอยากได้อ้อยคุณภาพดี ลองทำตามนี้ดูไหม เพราะมิตรจังดูเพื่อนบ้านแล้วเขาทำแบบนี้กัน :
+
+เปลี่ยนจากรดน้ำ 3 ครั้งต่อวัน -> 4 ครั้งต่อวัน
+
+ถ้าหากรับทราบหรือลองทำตามแล้วลองพิมพ์เพื่อแจ้งมาได้เลยนะ"""
+
+        elif intent == "STATUS_UPDATE":
+            # Status update confirmation
+            return "อัพเดทสถานะเรียบร้อยครับ ขอบคุณมาก"
+
         else:
             # Fallback to normal RAG if classification fails
             response = crew_infer(user_message)
