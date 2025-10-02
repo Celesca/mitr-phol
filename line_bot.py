@@ -140,7 +140,7 @@ def process_message(user_id, user_message):
 
         elif intent == "STATUS_UPDATE":
             # Status update confirmation
-            return "อัพเดทสถานะเรียบร้อยครับ ขอบคุณมาก"
+            return "อัพเดทสถานะเรียบร้อยค่ะ ขอบคุณมากนะคะ"
 
         else:
             # Fallback to normal RAG if classification fails
