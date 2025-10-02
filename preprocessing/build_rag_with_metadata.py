@@ -81,7 +81,7 @@ print(f"✅ Total chunks created: {len(all_chunks)}")
 # Build FAISS index
 # -----------------------------
 embeddings = HuggingFaceEmbeddings(
-    model_name="Qwen/Qwen3-Embedding-0.6B"
+    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 )
 db = FAISS.from_documents(all_chunks, embeddings)
 db.save_local("faiss_index")
