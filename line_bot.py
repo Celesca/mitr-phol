@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta
 from Multi_agent import crew_infer
 from Image_agent import process_sugarcane_image, ImageProcessor
+from intent_classifier import classify_message_intent
 
 # Load environment variables
 load_dotenv()
@@ -31,44 +32,83 @@ active_conversations = set()
 pending_images = {}  # user_id -> {'image_base64': str, 'timestamp': datetime}
 
 def download_image(message_id: str) -> str:
-    """Download image from LINE and return base64 encoded data"""
+    """Download image from LINE and save to local file, return file path"""
     try:
+        # Create images directory if it doesn't exist
+        import os
+        images_dir = "images"
+        if not os.path.exists(images_dir):
+            os.makedirs(images_dir)
+
+        # Generate unique filename
+        import uuid
+        filename = f"{uuid.uuid4()}.jpg"
+        filepath = os.path.join(images_dir, filename)
+
         # Get image content
         message_content = line_bot_api.get_message_content(message_id)
 
-        # Read image data
-        image_data = b""
-        for chunk in message_content.iter_content():
-            image_data += chunk
+        # Save image data to file
+        with open(filepath, 'wb') as f:
+            for chunk in message_content.iter_content():
+                f.write(chunk)
 
-        # Encode to base64
-        import base64
-        image_base64 = base64.b64encode(image_data).decode('utf-8')
-
-        return image_base64
+        print(f"Image saved to: {filepath}")
+        return filepath
     except Exception as e:
         print(f"Error downloading image: {e}")
         return None
 
 def cleanup_old_pending_images():
-    """Remove pending images older than 10 minutes"""
+    """Remove pending images older than 10 minutes and their files"""
     current_time = datetime.now()
-    expired_users = [
-        user_id for user_id, data in pending_images.items()
-        if current_time - data['timestamp'] > timedelta(minutes=10)
-    ]
+    expired_users = []
+    
+    for user_id, data in pending_images.items():
+        if current_time - data['timestamp'] > timedelta(minutes=10):
+            expired_users.append(user_id)
+            # Delete the image file
+            try:
+                if os.path.exists(data['image_path']):
+                    os.remove(data['image_path'])
+                    print(f"Deleted old image file: {data['image_path']}")
+            except Exception as e:
+                print(f"Error deleting image file {data['image_path']}: {e}")
+    
+    # Remove expired entries
     for user_id in expired_users:
         del pending_images[user_id]
 
 def process_message(user_id, user_message):
     """Process user message and return response"""
     try:
-        # Call the crew inference function
-        response = crew_infer(user_message)
-        # Ensure response is a string
-        if not isinstance(response, str):
-            response = str(response)
-        return response
+        # First, classify the intent of the message
+        intent = classify_message_intent(user_message)
+        print(f"Message intent: {intent}")
+
+        if intent == "NATURAL":
+            # Natural conversation - instant response
+            return "มีไรให้ช่วยคะ"
+
+        elif intent == "NORMALRAG":
+            # Normal sugarcane knowledge - use RAG system
+            response = crew_infer(user_message)
+            # Ensure response is a string
+            if not isinstance(response, str):
+                response = str(response)
+            return response
+
+        elif intent == "LOCALIZE":
+            # Localized/farmer-specific data - mock response for now
+            return "ขออภัยค่ะ ขณะนี้ระบบยังไม่รองรับการวิเคราะห์ข้อมูลเฉพาะบุคคลหรือพื้นที่ กรุณาถามคำถามทั่วไปเกี่ยวกับอ้อย หรือติดต่อเจ้าหน้าที่ที่ชำนาญโดยตรง /ปรึกษาผู้เชี่ยวชาญ"
+
+        else:
+            # Fallback to normal RAG if classification fails
+            response = crew_infer(user_message)
+            if not isinstance(response, str):
+                response = str(response)
+            return response
+
     except Exception as e:
         error_msg = f"ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผล: {str(e)}"
         print(f"Error processing message: {e}")
@@ -107,10 +147,18 @@ def handle_text_message(event):
     # Check if user has a pending image for classification
     if user_id in pending_images:
         # This is a description for an image classification
-        image_data = pending_images[user_id]['image_base64']
+        image_path = pending_images[user_id]['image_path']
 
         # Remove from pending images
         del pending_images[user_id]
+
+        # Clean up the image file after processing
+        try:
+            if os.path.exists(image_path):
+                os.remove(image_path)
+                print(f"Cleaned up processed image file: {image_path}")
+        except Exception as e:
+            print(f"Error cleaning up image file {image_path}: {e}")
 
         # Check if user already has an active conversation
         if user_id in active_conversations:
@@ -132,7 +180,7 @@ def handle_text_message(event):
         # Process image classification in background thread
         def background_process():
             try:
-                response = process_sugarcane_image(image_data, user_message)
+                response = process_sugarcane_image(image_path, user_message)
                 print(f"Image classification response: {str(response)[:200]}")
 
                 # Send the final response
@@ -214,13 +262,13 @@ def handle_image_message(event):
     user_id = event.source.user_id
     message_id = event.message.id
 
-    # Download and encode the image
-    image_base64 = download_image(message_id)
+    # Download and save the image
+    image_path = download_image(message_id)
 
-    if image_base64:
-        # Store the image for later classification
+    if image_path:
+        # Store the image path for later classification
         pending_images[user_id] = {
-            'image_base64': image_base64,
+            'image_path': image_path,
             'timestamp': datetime.now()
         }
 

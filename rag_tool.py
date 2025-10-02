@@ -11,7 +11,7 @@ from sentence_transformers import CrossEncoder
 
 # Load the embeddings model
 embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    model_name="Qwen/Qwen3-Embedding-0.6B"
 )
 
 # Load the FAISS index
@@ -43,7 +43,7 @@ class RAGSearchTool(BaseTool):
 
     # ✅ Mark as ClassVar so Pydantic ignores them
     embeddings: ClassVar = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+        model_name="Qwen/Qwen3-Embedding-0.6B"
     )
     vectorstore: ClassVar = FAISS.load_local(
         "faiss_index", embeddings, allow_dangerous_deserialization=True

@@ -4,11 +4,30 @@ A LINE chatbot that provides sugarcane farming advice using AI multi-agent syste
 
 ## Features
 
+- **Intent Classification**: Automatically classifies user messages into different categories for appropriate responses
 - **Text-based Q&A**: Answer sugarcane farming questions using RAG and multi-agent AI
 - **Image Disease Classification**: Upload sugarcane images to identify diseases using Claude Sonnet 4 vision
 - **Thai Language Support**: Provides advice in Thai for farmers
 - **Structured Responses**: Answers formatted with numbered points for clarity
 - **Async Processing**: Handles multiple conversations simultaneously
+
+## Intent Classification System
+
+The bot uses AI-powered intent classification to route messages appropriately:
+
+### Intent Types
+
+1. **NATURAL** - Casual conversation and greetings
+   - Examples: "สวัสดีค่ะ", "มีไรให้ช่วย", "ทำอะไรได้บ้าง"
+   - Response: Instant reply with "มีไรให้ช่วยคะ"
+
+2. **NORMALRAG** - General sugarcane farming knowledge
+   - Examples: "อ้อยเป็นโรคอะไรบ้าง", "พันธุ์อ้อยที่ดีที่สุด", "ปุ๋ยอะไรดี"
+   - Response: Processed through RAG system using `Multi_agent.py`
+
+3. **LOCALIZE** - Farmer-specific or location-based questions
+   - Examples: "อ้อยของฉันเป็นยังไง", "ที่นี่อ้อยโตไม่ดี", "แปลงของฉัน"
+   - Response: Currently shows placeholder message directing to experts
 
 ## How to Use
 
@@ -79,6 +98,15 @@ The bot can identify common sugarcane diseases including:
 
 ## Architecture
 
+### Core Components
+
+- **`line_bot.py`**: Main Flask application handling LINE webhooks and message routing
+- **`intent_classifier.py`**: AI-powered intent classification system
+- **`Multi_agent.py`**: CrewAI orchestration for text-based Q&A using RAG
+- **`Image_agent.py`**: Multimodal disease classification using Claude Sonnet 4 vision
+- **`rag_tool.py`**: RAG search implementation with FAISS and BM25
+- **`preprocessing/`**: Data preprocessing and RAG index building scripts
+
 ### Multi-Agent System
 - **Classifier Agent**: Categorizes questions into sugarcane topics
 - **Retriever Agent**: Searches knowledge base using RAG
@@ -91,6 +119,25 @@ The bot can identify common sugarcane diseases including:
 2. User provides description → Image + text sent to Claude Sonnet 4
 3. Multi-agent analysis → Disease identification and recommendations
 4. Structured response → Sent back to user
+
+## Testing
+
+### Test Intent Classifier
+```bash
+python test_intent_classifier.py
+```
+
+This will test the intent classification system with various message types and show accuracy.
+
+### Run the Bot Locally
+```bash
+python line_bot.py
+```
+
+For webhook testing, use ngrok:
+```bash
+ngrok http 5000
+```
 
 ## Troubleshooting
 

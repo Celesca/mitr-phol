@@ -69,17 +69,143 @@ class SugarcaneDiseaseClassifier:
             verbose=True
         )
 
-    def classify_disease_from_image(self, image_base64: str, user_description: str = "") -> str:
+    def classify_disease_from_image(self, image_path: str, user_description: str = "") -> str:
         """
-        Classify sugarcane disease from image and user description
+        Classify sugarcane disease from image file path and user description
 
         Args:
-            image_base64: Base64 encoded image data
+            image_path: Path to the image file
             user_description: Optional text description from user
 
         Returns:
             Classification result with treatment recommendations
         """
+
+        # Convert image to base64 for Claude vision API
+        try:
+            image_base64 = ImageProcessor.encode_image_from_path(image_path)
+        except Exception as e:
+            return f"Error processing image: {str(e)}"
+
+        # For now, use direct LLM call for image analysis since CrewAI context might not work properly with vision
+        try:
+            # Create the message with image for Claude vision
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"""Analyze this sugarcane image for disease symptoms. Look for:
+- Leaf discoloration (yellowing, browning, reddening)
+- Lesions, spots, or streaks on leaves
+- Wilting or drooping
+- Root rot or stem damage
+- Fungal growth or mold
+- Insect damage signs
+- Nutrient deficiency symptoms
+
+User description: {user_description}
+
+Provide a detailed description of what you see in the image."""
+                        },
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": image_base64
+                            }
+                        }
+                    ]
+                }
+            ]
+
+            # Call Claude directly for image analysis
+            response = self.llm.invoke(messages)
+            image_analysis = str(response)
+
+            # Now use CrewAI for the remaining tasks with the analysis result
+            return self._process_with_crew(image_analysis, user_description)
+
+        except Exception as e:
+            print(f"Error in direct LLM call: {e}")
+            # Fallback to CrewAI approach
+            return self._process_with_crew_fallback(image_base64, user_description)
+
+    def _process_with_crew(self, image_analysis: str, user_description: str) -> str:
+        """Process with CrewAI using the image analysis result"""
+
+        # Task 2: Classify the disease based on symptoms
+        task2 = Task(
+            description=f"""
+            Based on this visual analysis of the sugarcane image: '{image_analysis}'
+
+            Classify the sugarcane disease.
+
+            Common sugarcane diseases in Thailand:
+            1. Pokkah Boeng (Pokkah disease) - White stripe on leaves
+            2. Leaf scald - Water-soaked lesions
+            3. Red rot - Red discoloration in stalks
+            4. Wilt disease - Sudden wilting
+            5. Rust disease - Orange pustules on leaves
+            6. Smut disease - Black whip-like structures
+            7. Mosaic virus - Yellow/green mottling
+            8. Leaf blight - Brown lesions
+            9. Eyespot disease - Small circular spots
+            10. Downy mildew - White fungal growth
+
+            User description: {user_description}
+
+            Provide:
+            - Disease name
+            - Confidence level
+            - Key symptoms that match
+            - Differential diagnosis (why not other diseases)
+            """,
+            expected_output="Disease classification with confidence level and reasoning",
+            agent=self.disease_classifier
+        )
+
+        # Task 3: Provide treatment recommendations
+        task3 = Task(
+            description="""Based on the disease classification, provide comprehensive treatment recommendations.
+
+Include:
+1. Immediate actions to contain the disease
+2. Chemical treatments (if appropriate)
+3. Cultural practices to prevent spread
+4. Prevention strategies for the future
+5. Monitoring recommendations
+
+Structure the response with numbered points for clarity.
+Use Thai language for the final recommendations.""",
+            expected_output="Structured treatment recommendations in Thai with numbered points",
+            agent=self.advisor_agent
+        )
+
+        # Create and run the crew
+        crew = Crew(
+            agents=[self.disease_classifier, self.advisor_agent],
+            tasks=[task2, task3],
+            verbose=True,
+            planning=False
+        )
+
+        result = crew.kickoff()
+
+        # Extract the final result
+        if hasattr(result, 'final_output'):
+            return str(result.final_output)
+        elif hasattr(result, 'output'):
+            return str(result.output)
+        elif hasattr(result, 'raw'):
+            return str(result.raw)
+        else:
+            return str(result)
+
+    def _process_with_crew_fallback(self, image_base64: str, user_description: str) -> str:
+        """Fallback method using CrewAI context approach"""
 
         # Task 1: Analyze the image for disease symptoms
         image_analysis_prompt = f"""
@@ -102,6 +228,8 @@ class SugarcaneDiseaseClassifier:
             expected_output="Detailed visual analysis of disease symptoms observed in the sugarcane image",
             agent=self.image_analyzer,
             context=[{
+                "description": "Sugarcane plant image for disease analysis",
+                "expected_output": "Visual analysis of plant symptoms",
                 "type": "image",
                 "source": {
                     "type": "base64",
@@ -110,6 +238,68 @@ class SugarcaneDiseaseClassifier:
                 }
             }]
         )
+
+        # Task 2: Classify the disease based on symptoms
+        task2 = Task(
+            description="""Based on the visual analysis from Task 1, classify the sugarcane disease.
+
+Common sugarcane diseases in Thailand:
+1. Pokkah Boeng (Pokkah disease) - White stripe on leaves
+2. Leaf scald - Water-soaked lesions
+3. Red rot - Red discoloration in stalks
+4. Wilt disease - Sudden wilting
+5. Rust disease - Orange pustules on leaves
+6. Smut disease - Black whip-like structures
+7. Mosaic virus - Yellow/green mottling
+8. Leaf blight - Brown lesions
+9. Eyespot disease - Small circular spots
+10. Downy mildew - White fungal growth
+
+Provide:
+- Disease name
+- Confidence level
+- Key symptoms that match
+- Differential diagnosis (why not other diseases)""",
+            expected_output="Disease classification with confidence level and reasoning",
+            agent=self.disease_classifier
+        )
+
+        # Task 3: Provide treatment recommendations
+        task3 = Task(
+            description="""Based on the disease classification, provide comprehensive treatment recommendations.
+
+Include:
+1. Immediate actions to contain the disease
+2. Chemical treatments (if appropriate)
+3. Cultural practices to prevent spread
+4. Prevention strategies for the future
+5. Monitoring recommendations
+
+Structure the response with numbered points for clarity.
+Use Thai language for the final recommendations.""",
+            expected_output="Structured treatment recommendations in Thai with numbered points",
+            agent=self.advisor_agent
+        )
+
+        # Create and run the crew
+        crew = Crew(
+            agents=[self.image_analyzer, self.disease_classifier, self.advisor_agent],
+            tasks=[task1, task2, task3],
+            verbose=True,
+            planning=False
+        )
+
+        result = crew.kickoff()
+
+        # Extract the final result
+        if hasattr(result, 'final_output'):
+            return str(result.final_output)
+        elif hasattr(result, 'output'):
+            return str(result.output)
+        elif hasattr(result, 'raw'):
+            return str(result.raw)
+        else:
+            return str(result)
 
         # Task 2: Classify the disease based on symptoms
         task2 = Task(
@@ -177,19 +367,19 @@ class SugarcaneDiseaseClassifier:
         else:
             return str(result)
 
-def process_sugarcane_image(image_base64: str, user_description: str = "") -> str:
+def process_sugarcane_image(image_path: str, user_description: str = "") -> str:
     """
     Main function to process sugarcane disease classification
 
     Args:
-        image_base64: Base64 encoded image
+        image_path: Path to the image file
         user_description: User's text description
 
     Returns:
         Classification result and recommendations
     """
     classifier = SugarcaneDiseaseClassifier()
-    return classifier.classify_disease_from_image(image_base64, user_description)
+    return classifier.classify_disease_from_image(image_path, user_description)
 
 # Example usage
 if __name__ == "__main__":
