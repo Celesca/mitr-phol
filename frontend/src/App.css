@@ -36,3 +36,20 @@ button:focus, .cursor-pointer:focus {
   outline: 2px solid #16a34a;
   outline-offset: 2px;
 }
+
+/* Leaflet map custom marker styles */
+.custom-marker {
+  background: none !important;
+  border: none !important;
+}
+
+/* Ensure leaflet popup content is readable */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.leaflet-popup-content {
+  margin: 0;
+  font-family: inherit;
+}
