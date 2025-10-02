@@ -11,7 +11,7 @@ class IntentClassifier:
     def __init__(self):
         # Initialize Claude for intent classification
         self.llm = LLM(
-            model="us.qwen.qwen3-32b-v1:0",
+            model="us.anthropic.claude-sonnet-4-20250514-v1:0",
             aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
             aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
             aws_region_name="us-east-1"
@@ -37,19 +37,7 @@ class IntentClassifier:
             Intent category: "NATURAL", "NORMALRAG", or "LOCALIZE"
         """
 
-        # Quick checks for obvious cases first
-        message_lower = message.lower().strip()
-
-        # Check for natural conversation starters
-        natural_keywords = [
-            'สวัสดี', 'hello', 'hi', 'หวัดดี', 'ดี', 'สบายดี',
-            'ช่วยเหลือ', 'ช่วยอะไร', 'ทำอะไรได้บ้าง', 'ทำอะไรให้'
-        ]
-
-        if any(keyword in message_lower for keyword in natural_keywords) or len(message.strip()) < 5:
-            return "NATURAL"
-
-        # Use AI classification for more complex cases
+        # Use AI classification for all cases
         task = Task(
             description=f"""
             Classify this user message into one of three intent categories:
@@ -94,7 +82,7 @@ class IntentClassifier:
         # Validate and default to NORMALRAG if unclear
         if intent not in ["NATURAL", "NORMALRAG", "LOCALIZE"]:
             # Additional fallback logic
-            if any(word in message_lower for word in ['ฉัน', 'บ้าน', 'ที่นี่', 'แปลง', 'ฟาร์ม', 'ไร่']):
+            if any(word in message.lower() for word in ['ฉัน', 'บ้าน', 'ที่นี่', 'แปลง', 'ฟาร์ม', 'ไร่']):
                 return "LOCALIZE"
             else:
                 return "NORMALRAG"

@@ -1,11 +1,18 @@
 from crewai import LLM, Agent, Task, Crew
 import os
 from dotenv import load_dotenv
+from functools import lru_cache
+import time
 
 # Load environment variables from .env file
 load_dotenv()
 
 from rag_tool import RAGSearchTool
+
+# Simple in-memory cache for recent queries (max 100 entries)
+query_cache = {}
+CACHE_MAX_SIZE = 100
+CACHE_TTL = 3600  # 1 hour TTL
 
 default_region = "us-east-1"
 AWS_ACCESS_KEY = os.environ.get('AWS_ACCESS_KEY_ID')
@@ -22,7 +29,7 @@ llm = LLM(model="us.anthropic.claude-sonnet-4-20250514-v1:0",
 rag_tool = RAGSearchTool()
 
 # -----------------------------
-# Agents (Thai roles/goals)
+# Agents (Thai roles/goals) - Optimized for speed
 # -----------------------------
 classifier = Agent(
     llm=llm,
@@ -30,7 +37,9 @@ classifier = Agent(
     goal="Classify farmer questions into one or more sugarcane categories",
     backstory="You are an expert who understands the categorization of sugarcane cultivation knowledge",
     tools=[],
-    verbose=True
+    verbose=False,  # Reduced verbosity for speed
+    max_iter=3,     # Limit iterations
+    allow_delegation=False  # Direct execution
 )
 
 retriever = Agent(
@@ -39,7 +48,9 @@ retriever = Agent(
     goal="Search for relevant text from the knowledge base using RAG tool",
     backstory="You have a search tool that combines dense retrieval, BM25, and re-ranking",
     tools=[rag_tool],
-    verbose=True
+    verbose=False,  # Reduced verbosity for speed
+    max_iter=3,     # Limit iterations
+    allow_delegation=False  # Direct execution
 )
 
 advisor = Agent(
@@ -48,7 +59,9 @@ advisor = Agent(
     goal="Provide friendly, easy-to-understand advice for farmers",
     backstory="I am a kind advisor who loves helping farmers with easy-to-understand words, no special symbols",
     tools=[],
-    verbose=True
+    verbose=False,  # Reduced verbosity for speed
+    max_iter=3,     # Limit iterations
+    allow_delegation=False  # Direct execution
 )
 
 # -----------------------------
@@ -61,63 +74,80 @@ def crew_infer(question_text: str) -> str:
     2. Retrieve relevant passages from ALL categories (Agent 2).
     3. Summarize into advice (Agent 3).
     Returns the final answer in Thai.
+    
+    Includes caching for performance optimization.
     """
+    
+    # Check cache first
+    cache_key = question_text.strip().lower()
+    current_time = time.time()
+    
+    if cache_key in query_cache:
+        cached_result, timestamp = query_cache[cache_key]
+        if current_time - timestamp < CACHE_TTL:
+            print(f"Cache hit for: {question_text[:50]}...")
+            return cached_result
+    
+    # Clean up old cache entries if cache is too large
+    if len(query_cache) >= CACHE_MAX_SIZE:
+        # Remove oldest entries
+        sorted_cache = sorted(query_cache.items(), key=lambda x: x[1][1])
+        # Keep only the most recent 50 entries
+        query_cache.clear()
+        for key, value in sorted_cache[-50:]:
+            query_cache[key] = value
 
-    # Task 1: Explicit classification prompt
+    # Task 1: Explicit classification prompt - Simplified
     classify_prompt = f"""
-    Please classify the farmer's question into one or more of the following sugarcane categories.
-    Return only the category names (you can return more than one category separated by commas).
-
-    Categories:
+    Classify this sugarcane farming question into 1-2 categories from:
     1. Care and maintenance (growth period)
-    2. Soil preparation and sugarcane varieties
+    2. Soil preparation and sugarcane varieties  
     3. Harvesting and post-harvest management
     4. Marketing and general information
     5. Diseases and pests
 
-    Question: "{question_text}"
+    Question: {question_text}
+    Return only category names separated by commas.
     """
 
     task1 = Task(
         description=classify_prompt,
-        expected_output="One or more category names from the list above",
+        expected_output="Category names only, comma-separated",
         agent=classifier
     )
 
-    # Task 2: Retrieval with multi-label support
+    # Task 2: Retrieval with multi-label support - Optimized
     task2 = Task(
         description=f"""
-        Use the RAG tool to search for relevant text related to the question '{question_text}'
-        Filter by the categories obtained from Task 1 (if there are multiple categories, search from all categories and combine the results)
+        Search for relevant sugarcane farming information about: {question_text}
         
-        IMPORTANT: If you cannot find specific, relevant information that directly answers the question, 
-        respond with exactly: "NO_RELEVANT_INFO_FOUND"
-        Only provide actual retrieved content if you find information that specifically addresses the user's question.
+        Use the RAG tool to find specific information that directly answers this question.
+        If no relevant information exists, return exactly: "NO_RELEVANT_INFO_FOUND"
         """,
-        expected_output="Either specific relevant passages with metadata, or exactly 'NO_RELEVANT_INFO_FOUND' if no relevant information exists",
+        expected_output="Relevant passages or 'NO_RELEVANT_INFO_FOUND'",
         agent=retriever
     )
 
-    # Task 3: Summarization
+    # Task 3: Summarization - Optimized
     task3 = Task(
         description=f"""
-        Summarize the retrieved information into easy-to-understand and practical advice for farmers
-        Based on the question '{question_text}'
+        Provide practical sugarcane farming advice for: {question_text}
         
-        IMPORTANT: If the retrieved information contains "NO_RELEVANT_INFO_FOUND" or indicates no relevant information was found,
-        do not provide any advice and respond with exactly: "EXPERT_CONSULTATION_REQUIRED"
+        If information shows "NO_RELEVANT_INFO_FOUND", return exactly: "EXPERT_CONSULTATION_REQUIRED"
         
-        Otherwise, provide the answer as plain text, no special symbols, no headers, no bold text
+        Otherwise, give clear, practical advice in Thai. Keep it concise and actionable.
         """,
-        expected_output="Either practical advice in Thai as plain text, or exactly 'EXPERT_CONSULTATION_REQUIRED' if no relevant information exists",
+        expected_output="Thai advice or 'EXPERT_CONSULTATION_REQUIRED'",
         agent=advisor
     )
 
     crew = Crew(
         agents=[classifier, retriever, advisor],
         tasks=[task1, task2, task3],
-        verbose=True,
-        planning=False
+        verbose=False,  # Reduced verbosity for production speed
+        planning=False,
+        memory=False,   # Disable memory for faster execution
+        cache=False     # Disable caching to avoid overhead
     )
 
     result = crew.kickoff()
@@ -155,11 +185,22 @@ def crew_infer(question_text: str) -> str:
 
     # Check if advisor determined expert consultation is required
     if "EXPERT_CONSULTATION_REQUIRED" in final_output:
-        return "โปรดถามเจ้าหน้าที่ที่ชำนาญ\n/ปรึกษาผู้เชี่ยวชาญ"
+        result = "โปรดถามเจ้าหน้าที่ที่ชำนาญ\n/ปรึกษาผู้เชี่ยวชาญ"
+    else:
+        result = final_output
+    
+    # Cache the result
+    query_cache[cache_key] = (result, current_time)
+    
+    return result
 
-    return final_output
-
-# Remove the test code - this will be called from line_bot.py
-# query = "พันธุ์อ้อยที่ทนโรคใบด่าง"
-# answer = crew_infer(query)
-# print(answer)
+def crew_infer_with_timing(question_text: str) -> tuple[str, float]:
+    """
+    Run crew_infer with timing for performance monitoring.
+    Returns (response, processing_time_seconds)
+    """
+    start_time = time.time()
+    response = crew_infer(question_text)
+    end_time = time.time()
+    processing_time = end_time - start_time
+    return response, processing_time

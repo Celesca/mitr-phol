@@ -2,3 +2,5 @@
 faiss_index/
 __pycache__/
 qwen_faiss_index/
+model_cache/
+frontend/
