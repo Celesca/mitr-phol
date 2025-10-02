@@ -34,9 +34,10 @@ pending_images = {}  # user_id -> {'image_base64': str, 'timestamp': datetime}
 def download_image(message_id: str) -> str:
     """Download image from LINE and save to local file, return file path"""
     try:
-        # Create images directory if it doesn't exist
+        # Create images directory if it doesn't exist (use absolute path)
         import os
-        images_dir = "images"
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        images_dir = os.path.join(current_dir, "images")
         if not os.path.exists(images_dir):
             os.makedirs(images_dir)
 
@@ -63,18 +64,21 @@ def cleanup_old_pending_images():
     """Remove pending images older than 10 minutes and their files"""
     current_time = datetime.now()
     expired_users = []
-    
+
     for user_id, data in pending_images.items():
         if current_time - data['timestamp'] > timedelta(minutes=10):
             expired_users.append(user_id)
             # Delete the image file
             try:
-                if os.path.exists(data['image_path']):
-                    os.remove(data['image_path'])
-                    print(f"Deleted old image file: {data['image_path']}")
+                image_path = data['image_path']
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                    print(f"Deleted old image file: {image_path}")
+                else:
+                    print(f"Image file not found for cleanup: {image_path}")
             except Exception as e:
                 print(f"Error deleting image file {data['image_path']}: {e}")
-    
+
     # Remove expired entries
     for user_id in expired_users:
         del pending_images[user_id]
@@ -148,6 +152,21 @@ def handle_text_message(event):
     if user_id in pending_images:
         # This is a description for an image classification
         image_path = pending_images[user_id]['image_path']
+        print(f"Processing image classification for user {user_id}")
+        print(f"Image path: {image_path}")
+
+        # Verify image still exists before processing
+        if not os.path.exists(image_path):
+            print(f"ERROR: Image file not found at: {image_path}")
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="ขออภัยค่ะ ไม่พบไฟล์รูปภาพ กรุณาส่งรูปภาพใหม่อีกครั้ง")
+            )
+            del pending_images[user_id]
+            return
+
+        file_size = os.path.getsize(image_path)
+        print(f"Image file size: {file_size} bytes")
 
         # Remove from pending images
         del pending_images[user_id]
@@ -266,6 +285,14 @@ def handle_image_message(event):
     image_path = download_image(message_id)
 
     if image_path:
+        print(f"Image downloaded successfully to: {image_path}")
+        # Verify file exists
+        if os.path.exists(image_path):
+            file_size = os.path.getsize(image_path)
+            print(f"Image file exists with size: {file_size} bytes")
+        else:
+            print(f"ERROR: Image file does not exist at: {image_path}")
+
         # Store the image path for later classification
         pending_images[user_id] = {
             'image_path': image_path,
