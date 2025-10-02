@@ -48,8 +48,7 @@ retriever = Agent(
     goal="Search for relevant text from the knowledge base using RAG tool",
     backstory="You have a search tool that combines dense retrieval, BM25, and re-ranking",
     tools=[rag_tool],
-    verbose=False,  # Reduced verbosity for speed
-    max_iter=3,     # Limit iterations
+    verbose=True,  # Reduced verbosity for speed
     allow_delegation=False  # Direct execution
 )
 
