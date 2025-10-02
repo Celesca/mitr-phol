@@ -52,7 +52,7 @@ class RAGSearchTool(BaseTool):
 
     # NOTE: You must build BM25 index during preprocessing and load docs here
     bm25: ClassVar = BM25Retriever.from_documents(all_chunks)  # placeholder
-    dense: ClassVar = vectorstore.as_retriever(search_kwargs={"k": 20})
+    dense: ClassVar = vectorstore.as_retriever(search_kwargs={"k": 5})
     hybrid_retriever: ClassVar = EnsembleRetriever(
         retrievers=[bm25, dense], weights=[0.3, 0.7]
     )
@@ -78,10 +78,29 @@ class RAGSearchTool(BaseTool):
         else:
             top_docs = []
 
-        # Step 4: Format results
+        # Step 4: Format results and collect document references
         if not top_docs:
             return "No relevant documents found."
+
+        # Collect unique document sources
+        document_sources = set()
+        for doc in top_docs:
+            if doc.metadata and 'filename' in doc.metadata:
+                # Extract filename from metadata
+                filename = doc.metadata['filename']
+                # Remove .pdf extension if present
+                if filename.lower().endswith('.pdf'):
+                    filename = filename[:-4]
+                document_sources.add(filename)
+
+        # Format the main content
         results = "\n\n".join(
-            [f"[{i+1}] {d.page_content[:400]}... (source: {d.metadata})" for i, d in enumerate(top_docs)]
+            [f"[{i+1}] {d.page_content[:400]}..." for i, d in enumerate(top_docs)]
         )
+
+        # Add document references at the end
+        if document_sources:
+            doc_refs = "\n\n📚 อ้างอิงเอกสาร:\n" + "\n".join([f"• {doc}" for doc in sorted(document_sources)])
+            results += doc_refs
+
         return results

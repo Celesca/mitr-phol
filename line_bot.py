@@ -88,7 +88,8 @@ def process_message(user_id, user_message):
 
         if intent == "NATURAL":
             # Natural conversation - instant response
-            return "สวัสดีค่ะ มีไรให้มิตรจังผู้ช่วยชาวไร่อ้อยช่วยคะ?"
+            response = "สวัสดีค่ะ มีไรให้มิตรจังผู้ช่วยชาวไร่อ้อยช่วยคะ?"
+            return f"{response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
 
         elif intent == "NORMALRAG":
             # Normal sugarcane knowledge - use RAG system
@@ -96,23 +97,24 @@ def process_message(user_id, user_message):
             # Ensure response is a string
             if not isinstance(response, str):
                 response = str(response)
-            return response
+            return f"{response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
 
         elif intent == "LOCALIZE":
             # Localized/farmer-specific data - mock response for now
-            return "ขออภัยค่ะ ขณะนี้ระบบยังไม่รองรับการวิเคราะห์ข้อมูลเฉพาะบุคคลหรือพื้นที่ กรุณาถามคำถามทั่วไปเกี่ยวกับอ้อย หรือติดต่อเจ้าหน้าที่ที่ชำนาญโดยตรง /ปรึกษาผู้เชี่ยวชาญ"
+            response = "ขออภัยค่ะ ขณะนี้ระบบยังไม่รองรับการวิเคราะห์ข้อมูลเฉพาะบุคคลหรือพื้นที่ กรุณาถามคำถามทั่วไปเกี่ยวกับอ้อย หรือติดต่อเจ้าหน้าที่ที่ชำนาญโดยตรง /ปรึกษาผู้เชี่ยวชาญ"
+            return f"{response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
 
         else:
             # Fallback to normal RAG if classification fails
             response = crew_infer(user_message)
             if not isinstance(response, str):
                 response = str(response)
-            return response
+            return f"{response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
 
     except Exception as e:
         error_msg = f"ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผล: {str(e)}"
         print(f"Error processing message: {e}")
-        return error_msg
+        return f"{error_msg}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
     finally:
         # Remove from active conversations
         active_conversations.discard(user_id)
@@ -183,18 +185,23 @@ def handle_text_message(event):
                 response = process_sugarcane_image(image_path, user_message)
                 print(f"Image classification response: {str(response)[:200]}")
 
+                # Add reference to the response
+                final_response = f"{str(response)}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
+
                 # Send the final response
                 line_bot_api.push_message(
                     user_id,
-                    TextSendMessage(text=str(response))
+                    TextSendMessage(text=final_response)
                 )
                 print("Image classification result sent successfully")
             except Exception as e:
                 print(f"Error in image classification: {e}")
                 try:
+                    error_response = "ขออภัยค่ะ เกิดข้อผิดพลาดในการวิเคราะห์รูปภาพ"
+                    final_error_response = f"{error_response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
                     line_bot_api.push_message(
                         user_id,
-                        TextSendMessage(text="ขออภัยค่ะ เกิดข้อผิดพลาดในการวิเคราะห์รูปภาพ")
+                        TextSendMessage(text=final_error_response)
                     )
                 except:
                     pass
