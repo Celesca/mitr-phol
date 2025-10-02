@@ -26,7 +26,7 @@ CACHE_TTL = 3600  # 1 hour TTL
 #           aws_region_name=default_region
 #         )
 
-llm = LLM(model="ollama/qwen/qwen3:14b", 
+llm = LLM(model="ollama/qwen3:14b", 
           base_url="http://localhost:11434")
 
 rag_tool = RAGSearchTool()
