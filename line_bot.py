@@ -1,7 +1,7 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, ImageMessage, TextSendMessage
+from linebot.models import MessageEvent, TextMessage, ImageMessage, TextSendMessage, StickerMessage
 import os
 from dotenv import load_dotenv
 import threading
@@ -30,6 +30,35 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # Store active conversations and pending image classifications
 active_conversations = set()
 pending_images = {}  # user_id -> {'image_base64': str, 'timestamp': datetime}
+
+def send_loading_message(user_id, text_message):
+    """Send a loading message with animation"""
+    try:
+        # Send text message first
+        line_bot_api.push_message(
+            user_id,
+            TextSendMessage(text=text_message)
+        )
+        
+        # Send animated loading sticker (LINE's built-in animated sticker)
+        # Using packageId: 446, stickerId: 1989 (animated loading/working sticker)
+        line_bot_api.push_message(
+            user_id,
+            StickerMessage(
+                package_id='446',
+                sticker_id='1989'
+            )
+        )
+    except Exception as e:
+        print(f"Error sending loading message: {e}")
+        # Fallback to text only
+        try:
+            line_bot_api.push_message(
+                user_id,
+                TextSendMessage(text=text_message)
+            )
+        except:
+            pass
 
 def download_image(message_id: str) -> str:
     """Download image from LINE and save to local file, return file path"""
@@ -88,8 +117,7 @@ def process_message(user_id, user_message):
 
         if intent == "NATURAL":
             # Natural conversation - instant response
-            response = "สวัสดีค่ะ มีไรให้มิตรจังผู้ช่วยชาวไร่อ้อยช่วยคะ?"
-            return f"{response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
+            return "สวัสดีค่ะ มีไรให้มิตรจังผู้ช่วยชาวไร่อ้อยช่วยคะ?"
 
         elif intent == "NORMALRAG":
             # Normal sugarcane knowledge - use RAG system
@@ -97,24 +125,23 @@ def process_message(user_id, user_message):
             # Ensure response is a string
             if not isinstance(response, str):
                 response = str(response)
-            return f"{response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
+            return response
 
         elif intent == "LOCALIZE":
             # Localized/farmer-specific data - mock response for now
-            response = "ขออภัยค่ะ ขณะนี้ระบบยังไม่รองรับการวิเคราะห์ข้อมูลเฉพาะบุคคลหรือพื้นที่ กรุณาถามคำถามทั่วไปเกี่ยวกับอ้อย หรือติดต่อเจ้าหน้าที่ที่ชำนาญโดยตรง /ปรึกษาผู้เชี่ยวชาญ"
-            return f"{response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
+            return "ขออภัยค่ะ ขณะนี้ระบบยังไม่รองรับการวิเคราะห์ข้อมูลเฉพาะบุคคลหรือพื้นที่ กรุณาถามคำถามทั่วไปเกี่ยวกับอ้อย หรือติดต่อเจ้าหน้าที่ที่ชำนาญโดยตรง /ปรึกษาผู้เชี่ยวชาญ"
 
         else:
             # Fallback to normal RAG if classification fails
             response = crew_infer(user_message)
             if not isinstance(response, str):
                 response = str(response)
-            return f"{response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
+            return response
 
     except Exception as e:
         error_msg = f"ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผล: {str(e)}"
         print(f"Error processing message: {e}")
-        return f"{error_msg}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
+        return error_msg
     finally:
         # Remove from active conversations
         active_conversations.discard(user_id)
@@ -173,11 +200,8 @@ def handle_text_message(event):
         # Add to active conversations
         active_conversations.add(user_id)
 
-        # Send initial waiting message
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="รอสักครู่ค่ะ กำลังวิเคราะห์รูปภาพและจำแนกโรค...")
-        )
+        # Send initial waiting message with animation
+        send_loading_message(user_id, "รอสักครู่ค่ะ กำลังวิเคราะห์รูปภาพและจำแนกโรค...")
 
         # Process image classification in background thread
         def background_process():
@@ -185,23 +209,18 @@ def handle_text_message(event):
                 response = process_sugarcane_image(image_path, user_message)
                 print(f"Image classification response: {str(response)[:200]}")
 
-                # Add reference to the response
-                final_response = f"{str(response)}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
-
                 # Send the final response
                 line_bot_api.push_message(
                     user_id,
-                    TextSendMessage(text=final_response)
+                    TextSendMessage(text=str(response))
                 )
                 print("Image classification result sent successfully")
             except Exception as e:
                 print(f"Error in image classification: {e}")
                 try:
-                    error_response = "ขออภัยค่ะ เกิดข้อผิดพลาดในการวิเคราะห์รูปภาพ"
-                    final_error_response = f"{error_response}\n\n📚 แหล่งข้อมูล: มิตรผล ผู้ช่วยชาวไร่อ้อย"
                     line_bot_api.push_message(
                         user_id,
-                        TextSendMessage(text=final_error_response)
+                        TextSendMessage(text="ขออภัยค่ะ เกิดข้อผิดพลาดในการวิเคราะห์รูปภาพ")
                     )
                 except:
                     pass
@@ -226,11 +245,8 @@ def handle_text_message(event):
         # Add to active conversations
         active_conversations.add(user_id)
 
-        # Send initial waiting message
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="รอสักครู่ค่ะ กำลังเตรียมคำตอบ...")
-        )
+        # Send initial waiting message with animation
+        send_loading_message(user_id, "รอสักครู่ค่ะ กำลังเตรียมคำตอบ...")
 
         # Process message in background thread
         def background_process():
