@@ -89,8 +89,12 @@ def crew_infer(question_text: str) -> str:
         description=f"""
         Use the RAG tool to search for relevant text related to the question '{question_text}'
         Filter by the categories obtained from Task 1 (if there are multiple categories, search from all categories and combine the results)
+        
+        IMPORTANT: If you cannot find specific, relevant information that directly answers the question, 
+        respond with exactly: "NO_RELEVANT_INFO_FOUND"
+        Only provide actual retrieved content if you find information that specifically addresses the user's question.
         """,
-        expected_output="Up to 5 relevant passages per category with metadata",
+        expected_output="Either specific relevant passages with metadata, or exactly 'NO_RELEVANT_INFO_FOUND' if no relevant information exists",
         agent=retriever
     )
 
@@ -100,9 +104,12 @@ def crew_infer(question_text: str) -> str:
         Summarize the retrieved information into easy-to-understand and practical advice for farmers
         Based on the question '{question_text}'
         
-        Provide the answer as plain text, no special symbols, no headers, no bold text
+        IMPORTANT: If the retrieved information contains "NO_RELEVANT_INFO_FOUND" or indicates no relevant information was found,
+        do not provide any advice and respond with exactly: "EXPERT_CONSULTATION_REQUIRED"
+        
+        Otherwise, provide the answer as plain text, no special symbols, no headers, no bold text
         """,
-        expected_output="Short description with practical steps (in Thai) as plain text without symbols",
+        expected_output="Either practical advice in Thai as plain text, or exactly 'EXPERT_CONSULTATION_REQUIRED' if no relevant information exists",
         agent=advisor
     )
 
@@ -118,30 +125,39 @@ def crew_infer(question_text: str) -> str:
     # Check if RAG search found no relevant documents
     # Extract the retriever result from task2
     if hasattr(result, 'tasks_output') and len(result.tasks_output) >= 2:
-        retriever_output = str(result.tasks_output[1].output)
-        if "No relevant documents found" in retriever_output or retriever_output.strip() == "":
+        retriever_output = str(result.tasks_output[1].raw)
+        if ("No relevant documents found" in retriever_output or 
+            retriever_output.strip() == "" or 
+            "NO_RELEVANT_INFO_FOUND" in retriever_output):
             return "โปรดถามเจ้าหน้าที่ที่ชำนาญ\n/ปรึกษาผู้เชี่ยวชาญ"
 
     # Extract the actual text result from CrewOutput
 
     # Handle different CrewAI result formats
+    final_output = ""
     if hasattr(result, 'final_output'):
-        return str(result.final_output)
+        final_output = str(result.final_output)
     elif hasattr(result, 'output'):
-        return str(result.output)
+        final_output = str(result.output)
     elif hasattr(result, 'raw'):
-        return str(result.raw)
+        final_output = str(result.raw)
     elif isinstance(result, (list, tuple)) and len(result) > 0:
         # If it's a list of task results, get the last one (final answer)
         final_result = result[-1]
         if hasattr(final_result, 'output'):
-            return str(final_result.output)
+            final_output = str(final_result.output)
         elif hasattr(final_result, 'raw'):
-            return str(final_result.raw)
+            final_output = str(final_result.raw)
         else:
-            return str(final_result)
+            final_output = str(final_result)
     else:
-        return str(result)
+        final_output = str(result)
+
+    # Check if advisor determined expert consultation is required
+    if "EXPERT_CONSULTATION_REQUIRED" in final_output:
+        return "โปรดถามเจ้าหน้าที่ที่ชำนาญ\n/ปรึกษาผู้เชี่ยวชาญ"
+
+    return final_output
 
 # Remove the test code - this will be called from line_bot.py
 # query = "พันธุ์อ้อยที่ทนโรคใบด่าง"
