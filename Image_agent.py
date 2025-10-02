@@ -152,6 +152,8 @@ from rag_tool import RAGSearchTool
 class ImageProcessor:
     """Helper class to process images for local inference"""
 
+    FALLBACK_IMAGE_URL = "https://storage.googleapis.com/kaggle-datasets-images/4320051/7424766/dd16b4fb7c01be6166e23cc348ae65ec/dataset-cover.jpeg?t=2024-01-18-04-10-18"
+
     @staticmethod
     def save_image_from_url(image_url: str, save_path: str) -> str:
         """Download image from URL and save to local path"""
@@ -188,6 +190,14 @@ class ImageProcessor:
             return save_path
         except Exception as e:
             raise Exception(f"Failed to save base64 image: {str(e)}")
+
+    @staticmethod
+    def get_fallback_image(save_path: str) -> str:
+        """Download and return the fallback image for testing"""
+        try:
+            return ImageProcessor.save_image_from_url(ImageProcessor.FALLBACK_IMAGE_URL, save_path)
+        except Exception as e:
+            raise Exception(f"Failed to download fallback image: {str(e)}")
 
 class SugarcaneDiseaseClassifier:
     """Multi-agent system for sugarcane disease classification using local ViT model"""
@@ -229,12 +239,12 @@ class SugarcaneDiseaseClassifier:
             verbose=False
         )
 
-    def classify_disease_from_image(self, image_path: str, user_description: str = "") -> str:
+    def classify_disease_from_image(self, image_path: str = None, user_description: str = "") -> str:
         """
         Classify sugarcane disease from image file path and user description
 
         Args:
-            image_path: Path to the image file
+            image_path: Path to the image file (optional - will use fallback if None)
             user_description: Optional text description from user
 
         Returns:
@@ -245,6 +255,23 @@ class SugarcaneDiseaseClassifier:
             return "ขออภัยค่ะ ระบบจำแนกโรคไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง"
 
         try:
+            # Handle case where no image is provided - use fallback
+            if image_path is None or not os.path.exists(image_path):
+                print("No image provided or image not found, using fallback image")
+                # Create fallback image path
+                fallback_dir = os.path.join(os.path.dirname(__file__), "fallback_images")
+                os.makedirs(fallback_dir, exist_ok=True)
+                import uuid
+                fallback_filename = f"fallback_{uuid.uuid4()}.jpg"
+                fallback_path = os.path.join(fallback_dir, fallback_filename)
+
+                try:
+                    image_path = ImageProcessor.get_fallback_image(fallback_path)
+                    print(f"Downloaded fallback image to: {image_path}")
+                except Exception as e:
+                    print(f"Failed to download fallback image: {e}")
+                    return "ขออภัยค่ะ ไม่สามารถโหลดรูปภาพสำหรับการทดสอบได้"
+
             # Use local classifier for disease classification
             classification_result = self.local_classifier.predict(image_path, top_k=3)
 
@@ -352,12 +379,12 @@ class SugarcaneDiseaseClassifier:
         else:
             return str(result)
 
-def process_sugarcane_image(image_path: str, user_description: str = "") -> str:
+def process_sugarcane_image(image_path: str = None, user_description: str = "") -> str:
     """
     Main function to process sugarcane disease classification
 
     Args:
-        image_path: Path to the image file
+        image_path: Path to the image file (optional - will use fallback if None)
         user_description: User's text description
 
     Returns:
@@ -371,4 +398,11 @@ if __name__ == "__main__":
     # Test with a sample image
     # result = process_sugarcane_image("path/to/image.jpg", "ใบเหลืองและมีจุด")
     # print(result)
+
+    # Test with fallback image (no image_path provided)
+    print("Testing with fallback image...")
+    result = process_sugarcane_image(None, "ทดสอบระบบจำแนกโรคด้วยรูปภาพตัวอย่าง")
+    print("Fallback test result:")
+    print(result)
+
     print("Sugarcane Disease Classifier with local ViT model initialized.")

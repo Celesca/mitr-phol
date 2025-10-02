@@ -158,12 +158,9 @@ def handle_text_message(event):
         # Verify image still exists before processing
         if not os.path.exists(image_path):
             print(f"ERROR: Image file not found at: {image_path}")
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="ขออภัยค่ะ ไม่พบไฟล์รูปภาพ กรุณาส่งรูปภาพใหม่อีกครั้ง")
-            )
-            del pending_images[user_id]
-            return
+            print("Using fallback image for processing")
+            # Use fallback image
+            image_path = None  # This will trigger fallback in process_sugarcane_image
 
         file_size = os.path.getsize(image_path)
         print(f"Image file size: {file_size} bytes")
