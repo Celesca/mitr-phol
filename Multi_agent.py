@@ -49,7 +49,6 @@ retriever = Agent(
     backstory="You have a search tool that combines dense retrieval, BM25, and re-ranking",
     tools=[rag_tool],
     verbose=False,  # Reduced verbosity for speed
-    max_iter=3,     # Limit iterations
     allow_delegation=False  # Direct execution
 )
 
@@ -60,7 +59,6 @@ advisor = Agent(
     backstory="I am a kind advisor who loves helping farmers with easy-to-understand words, no special symbols",
     tools=[],
     verbose=False,  # Reduced verbosity for speed
-    max_iter=3,     # Limit iterations
     allow_delegation=False  # Direct execution
 )
 

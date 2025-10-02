@@ -4,3 +4,4 @@ __pycache__/
 qwen_faiss_index/
 model_cache/
 frontend/
+qwen_faiss_index.zip

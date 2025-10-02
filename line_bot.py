@@ -88,7 +88,7 @@ def process_message(user_id, user_message):
 
         if intent == "NATURAL":
             # Natural conversation - instant response
-            return "มีไรให้ช่วยคะ"
+            return "สวัสดีค่ะ มิตรจังผู้ชมีไรให้ช่วยคะ"
 
         elif intent == "NORMALRAG":
             # Normal sugarcane knowledge - use RAG system
