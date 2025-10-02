@@ -71,7 +71,9 @@ class RAGSearchTool(BaseTool):
         if candidates:
             pairs = [(query, d.page_content) for d in candidates]
             scores = self.cross_encoder.predict(pairs)
-            reranked = [doc for _, doc in sorted(zip(scores, candidates), reverse=True)]
+            # Sort by score (descending) and get the indices to avoid Document comparison
+            sorted_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+            reranked = [candidates[i] for i in sorted_indices]
             top_docs = reranked[:5]
         else:
             top_docs = []

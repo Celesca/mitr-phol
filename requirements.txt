@@ -7,3 +7,10 @@ boto3
 python-dotenv
 line-bot-sdk
 flask
+sentence-transformers
+scikit-learn
+folium
+plotly
+matplotlib
+pandas
+numpy
