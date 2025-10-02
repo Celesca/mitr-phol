@@ -1,7 +1,7 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, ImageMessage, TextSendMessage, StickerMessage
+from linebot.models import MessageEvent, TextMessage, ImageMessage, TextSendMessage
 import os
 from dotenv import load_dotenv
 import threading
@@ -30,35 +30,6 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 # Store active conversations and pending image classifications
 active_conversations = set()
 pending_images = {}  # user_id -> {'image_base64': str, 'timestamp': datetime}
-
-def send_loading_message(user_id, text_message):
-    """Send a loading message with animation"""
-    try:
-        # Send text message first
-        line_bot_api.push_message(
-            user_id,
-            TextSendMessage(text=text_message)
-        )
-        
-        # Send animated loading sticker (LINE's built-in animated sticker)
-        # Using packageId: 446, stickerId: 1989 (animated loading/working sticker)
-        line_bot_api.push_message(
-            user_id,
-            StickerMessage(
-                package_id='446',
-                sticker_id='1989'
-            )
-        )
-    except Exception as e:
-        print(f"Error sending loading message: {e}")
-        # Fallback to text only
-        try:
-            line_bot_api.push_message(
-                user_id,
-                TextSendMessage(text=text_message)
-            )
-        except:
-            pass
 
 def download_image(message_id: str) -> str:
     """Download image from LINE and save to local file, return file path"""
@@ -200,8 +171,11 @@ def handle_text_message(event):
         # Add to active conversations
         active_conversations.add(user_id)
 
-        # Send initial waiting message with animation
-        send_loading_message(user_id, "รอสักครู่ค่ะ กำลังวิเคราะห์รูปภาพและจำแนกโรค...")
+        # Send initial waiting message
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="รอสักครู่ค่ะ กำลังวิเคราะห์รูปภาพและจำแนกโรค...")
+        )
 
         # Process image classification in background thread
         def background_process():
@@ -245,8 +219,11 @@ def handle_text_message(event):
         # Add to active conversations
         active_conversations.add(user_id)
 
-        # Send initial waiting message with animation
-        send_loading_message(user_id, "รอสักครู่ค่ะ กำลังเตรียมคำตอบ...")
+        # Send initial waiting message
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="รอสักครู่ค่ะ กำลังเตรียมคำตอบ...")
+        )
 
         # Process message in background thread
         def background_process():

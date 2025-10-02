@@ -135,8 +135,10 @@ def crew_infer(question_text: str) -> str:
         If information shows "NO_RELEVANT_INFO_FOUND", return exactly: "EXPERT_CONSULTATION_REQUIRED"
         
         Otherwise, give clear, practical advice in Thai. Keep it concise and actionable.
+        IMPORTANT: If the retrieved information contains document references (📚 อ้างอิงเอกสาร:), 
+        you MUST include them at the end of your response exactly as they appear.
         """,
-        expected_output="Thai advice or 'EXPERT_CONSULTATION_REQUIRED'",
+        expected_output="Thai advice with document references if available, or 'EXPERT_CONSULTATION_REQUIRED'",
         agent=advisor
     )
 
