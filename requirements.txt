@@ -7,6 +7,7 @@ boto3
 python-dotenv
 line-bot-sdk
 flask
+flask-cors
 sentence-transformers
 scikit-learn
 folium

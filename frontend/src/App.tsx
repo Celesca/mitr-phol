@@ -21,6 +21,7 @@ L.Icon.Default.mergeOptions({
 function App() {
   const [currentView, setCurrentView] = useState<'welcome' | 'map' | 'survey'>('welcome')
   const [selectedFarm, setSelectedFarm] = useState<FarmData | null>(null)
+  const [highlightedFarms, setHighlightedFarms] = useState<Set<string>>(new Set())
   const [showFullSummary, setShowFullSummary] = useState(false)
   const [farmData, setFarmData] = useState<FarmData[]>([])
   const [loading, setLoading] = useState(false)
@@ -53,31 +54,90 @@ function App() {
   const handleBackToWelcome = () => {
     setCurrentView('welcome')
     setSelectedFarm(null)
+    setHighlightedFarms(new Set())
     setShowFullSummary(false)
   }
 
   const handleFarmClick = (farm: FarmData) => {
     setSelectedFarm(farm)
     setShowFullSummary(false)
+
+    // Calculate distances and highlight nearby farms within 5km radius
+    const highlighted = new Set<string>()
+    highlighted.add(farm.farm_id)
+
+    const maxDistance = 5000 // 5km in meters
+
+    farmData.forEach((otherFarm) => {
+      if (otherFarm.farm_id !== farm.farm_id) {
+        const distance = calculateDistance(
+          farm.latitude, farm.longitude,
+          otherFarm.latitude, otherFarm.longitude
+        )
+        if (distance <= maxDistance) {
+          highlighted.add(otherFarm.farm_id)
+        }
+      }
+    })
+
+    setHighlightedFarms(highlighted)
   }
 
-  const getMarkerColor = (isAnomaly: boolean, cssDifference: number) => {
+  // Haversine formula to calculate distance between two points on Earth
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371000 // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180
+    const dLon = (lon2 - lon1) * Math.PI / 180
+    const a =
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon/2) * Math.sin(dLon/2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+    return R * c // Distance in meters
+  }
+
+  const getMarkerColor = (isAnomaly: boolean, neighborhoodAvgYieldDifference: number) => {
     if (isAnomaly) {
-      return cssDifference > 0 ? '#dc2626' : '#ea580c' // Red for high anomaly, orange for low
+      return neighborhoodAvgYieldDifference > 0 ? '#dc2626' : '#ea580c' // Red for high anomaly, orange for low
     }
     return '#16a34a' // Green for normal
   }
 
-  const createCustomIcon = (isAnomaly: boolean, cssDifference: number) => {
-    const color = getMarkerColor(isAnomaly, cssDifference)
+  const createCustomIcon = (isAnomaly: boolean, neighborhoodAvgYieldDifference: number, isHighlighted: boolean, isSelected: boolean) => {
+    const baseColor = getMarkerColor(isAnomaly, neighborhoodAvgYieldDifference)
+
+    let finalColor = baseColor
+    let opacity = 1
+    let borderColor = 'white'
+    let borderWidth = 3
+
+    if (selectedFarm) {
+      if (isSelected) {
+        // Selected farm: bright color with gold border
+        borderColor = '#fbbf24'
+        borderWidth = 4
+      } else if (isHighlighted) {
+        // Highlighted neighbors: normal color but slightly brighter
+        opacity = 0.9
+        borderColor = '#3b82f6'
+        borderWidth = 3
+      } else {
+        // Non-highlighted farms: grayed out
+        finalColor = '#9ca3af' // Gray color
+        opacity = 0.4
+        borderColor = '#d1d5db'
+        borderWidth = 2
+      }
+    }
+
     return L.divIcon({
       className: 'custom-marker',
       html: `<div style="
-        background-color: ${color};
+        background-color: ${finalColor};
         width: 20px;
         height: 20px;
         border-radius: 50%;
-        border: 3px solid white;
+        border: ${borderWidth}px solid ${borderColor};
         box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         display: flex;
         align-items: center;
@@ -85,6 +145,7 @@ function App() {
         font-size: 10px;
         font-weight: bold;
         color: white;
+        opacity: ${opacity};
       ">${isAnomaly ? '!' : '✓'}</div>`,
       iconSize: [26, 26],
       iconAnchor: [13, 13],
@@ -135,21 +196,26 @@ function App() {
                     <Marker
                       key={farm.farm_id}
                       position={[farm.latitude, farm.longitude]}
-                      icon={createCustomIcon(farm.is_anomaly, farm.css_difference)}
+                      icon={createCustomIcon(
+                        farm.is_anomaly,
+                        farm.neighborhood_avg_yield_difference,
+                        highlightedFarms.has(farm.farm_id),
+                        selectedFarm?.farm_id === farm.farm_id
+                      )}
                       eventHandlers={{
                         click: () => handleFarmClick(farm),
                       }}
                     >
                       <Popup>
                         <div className="p-2 min-w-[200px]">
-                          <h3 className="font-bold text-gray-800">{farm.farm_name}</h3>
+                          <h3 className="font-bold text-gray-800">{farm.farmer_name}</h3>
                           <p className="text-sm text-gray-600">ID: {farm.farm_id}</p>
                           <p className={`text-sm font-medium ${farm.is_anomaly ? 'text-red-600' : 'text-green-600'}`}>
                             {farm.is_anomaly ? '⚠️ มีความผิดปกติ' : '✅ ปกติ'}
                           </p>
                           <p className="text-sm">
-                            ความแตกต่าง CSS: <span className={farm.css_difference < 0 ? 'text-red-600' : 'text-green-600'}>
-                              {farm.css_difference > 0 ? '+' : ''}{farm.css_difference.toFixed(1)}
+                            ความแตกต่างผลผลิตเฉลี่ย: <span className={farm.neighborhood_avg_yield_difference < 0 ? 'text-red-600' : 'text-green-600'}>
+                              {farm.neighborhood_avg_yield_difference > 0 ? '+' : ''}{farm.neighborhood_avg_yield_difference.toFixed(1)}
                             </span>
                           </p>
                         </div>
@@ -164,7 +230,7 @@ function App() {
                 {selectedFarm ? (
                   <div className="space-y-4">
                     <div>
-                      <h3 className="text-lg font-bold text-gray-800">{selectedFarm.farm_name}</h3>
+                      <h3 className="text-lg font-bold text-gray-800">{selectedFarm.farmer_name}</h3>
                       <p className="text-sm text-gray-600">รหัสแปลง: {selectedFarm.farm_id}</p>
                     </div>
 
@@ -181,25 +247,25 @@ function App() {
                       </div>
 
                       <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium">ความแตกต่าง CSS:</span>
+                        <span className="text-sm font-medium">ความแตกต่างผลผลิตเฉลี่ย:</span>
                         <span className={`font-bold ${
-                          selectedFarm.css_difference < 0 ? 'text-red-600' : 'text-green-600'
+                          selectedFarm.neighborhood_avg_yield_difference < 0 ? 'text-red-600' : 'text-green-600'
                         }`}>
-                          {selectedFarm.css_difference > 0 ? '+' : ''}{selectedFarm.css_difference.toFixed(1)}
+                          {selectedFarm.neighborhood_avg_yield_difference > 0 ? '+' : ''}{selectedFarm.neighborhood_avg_yield_difference.toFixed(1)}
                         </span>
                       </div>
                     </div>
 
                     <div>
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">สรุปการดำเนินการ:</h4>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">การวิเคราะห์จาก AI:</h4>
                       <div className="bg-white rounded-lg p-3 border">
                         <p className="text-sm text-gray-600 leading-relaxed">
                           {showFullSummary
-                            ? selectedFarm.summarize_action
-                            : `${selectedFarm.summarize_action.substring(0, 100)}...`
+                            ? selectedFarm.llm_reasoning
+                            : `${selectedFarm.llm_reasoning.substring(0, 100)}...`
                           }
                         </p>
-                        {selectedFarm.summarize_action.length > 100 && (
+                        {selectedFarm.llm_reasoning.length > 100 && (
                           <button
                             onClick={() => setShowFullSummary(!showFullSummary)}
                             className="text-xs text-blue-600 hover:text-blue-800 mt-2 font-medium"
@@ -207,6 +273,18 @@ function App() {
                             {showFullSummary ? 'แสดงน้อยลง' : 'แสดงทั้งหมด'}
                           </button>
                         )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">เพื่อนบ้านใกล้เคียง:</h4>
+                      <div className="bg-white rounded-lg p-3 border">
+                        <p className="text-sm text-gray-600">
+                          แปลงใกล้เคียงในรัศมี 5 กม.: {(highlightedFarms.size - 1)} แปลง
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          แปลงเหล่านี้จะถูกไฮไลต์บนแผนที่
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -225,6 +303,14 @@ function App() {
                   <h4 className="text-sm font-medium text-gray-700 mb-3">สัญลักษณ์:</h4>
                   <div className="space-y-2">
                     <div className="flex items-center">
+                      <div className="w-4 h-4 bg-yellow-400 rounded-full mr-2 border-2 border-yellow-600"></div>
+                      <span className="text-xs text-gray-600">แปลงที่เลือก</span>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-4 h-4 bg-blue-400 rounded-full mr-2 border-2 border-blue-600"></div>
+                      <span className="text-xs text-gray-600">เพื่อนบ้านใกล้เคียง (≤5km)</span>
+                    </div>
+                    <div className="flex items-center">
                       <div className="w-4 h-4 bg-green-600 rounded-full mr-2"></div>
                       <span className="text-xs text-gray-600">ปกติ</span>
                     </div>
@@ -235,6 +321,10 @@ function App() {
                     <div className="flex items-center">
                       <div className="w-4 h-4 bg-red-600 rounded-full mr-2"></div>
                       <span className="text-xs text-gray-600">ผิดปกติ (สูง)</span>
+                    </div>
+                    <div className="flex items-center">
+                      <div className="w-4 h-4 bg-gray-400 rounded-full mr-2 opacity-40"></div>
+                      <span className="text-xs text-gray-600">อื่นๆ (ถูกปิดเสียง)</span>
                     </div>
                   </div>
                 </div>
